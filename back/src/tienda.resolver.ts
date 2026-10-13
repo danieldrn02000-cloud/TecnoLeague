@@ -70,22 +70,6 @@ export class AuthResolver {
     return this.auth.iniciarSesion(datos);
   }
 
-  @Mutation("solicitarRecuperacion") solicitarRecuperacion(
-    @Args("email") email: string,
-    @Context() ctx: RequestContext,
-  ) {
-    exigirPuenteAuth(ctx);
-    return this.auth.solicitarRecuperacion(email);
-  }
-
-  @Mutation("restablecerPassword") restablecerPassword(
-    @Args("token") token: string,
-    @Args("password") password: string,
-    @Context() ctx: RequestContext,
-  ) {
-    exigirPuenteAuth(ctx);
-    return this.auth.restablecerPassword(token, password);
-  }
 
   @Query("usuarioActual")
   @UseGuards(AuthGuard)
