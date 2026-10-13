@@ -81,7 +81,7 @@ export function Pedidos({ navegar }: { navegar: Navegar }) {
                   {
                     (
                       {
-                        PENDIENTE: "Pagado",
+                        PENDIENTE: "Pendiente de pago",
                         PAGADO: "Pagado",
                         ENVIADO: "Enviado",
                         ENTREGADO: "Entregado",

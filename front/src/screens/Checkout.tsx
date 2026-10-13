@@ -28,12 +28,14 @@ export function Checkout({
         onClick={() => navegar({ tipo: "catalogo" })}
       />
     );
+    
   async function enviar(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (bloqueado.current) return;
-    bloqueado.current = true;
+      if (bloqueado.current) return;
+      bloqueado.current = true;
     setBusy(true);
     setError("");
+
     const form = new FormData(e.currentTarget);
     const payload = {
       nombre: String(form.get("nombre")).trim(),
@@ -44,9 +46,11 @@ export function Checkout({
         cantidad: l.cantidad,
       })),
     };
+
     const contenido = JSON.stringify(payload);
-    if (solicitud.current.contenido !== contenido)
-      solicitud.current = { contenido, clave: crypto.randomUUID() };
+      if (solicitud.current.contenido !== contenido)
+        solicitud.current = { contenido, clave: crypto.randomUUID() };
+      
     try {
       if (!pedidoCreado.current) {
       const { crearPedido } = await graphql<{ crearPedido: Pedido }>(
