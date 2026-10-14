@@ -11,6 +11,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { PagosController } from "./pagos.controller";
 import { AdminResolver, CategoriaAdminResolver, EventoEstadoPedidoResolver, MovimientoInventarioResolver, PagoAdminResolver, PagoPedidoResolver } from "./admin.resolver";
 import { AdminService } from "./admin.service";
+import {SubscriptionsResolver} from "./subscription.resolver";
 import type { RequestContext } from "./types";
 
 import {
@@ -32,6 +33,7 @@ import {
       path: "/graphql",
       graphiql: true,
       introspection: true,
+      subscriptions:{"graphql-ws":{path: "/graphql"}}, //protocolo para subcriptions
       context: ({ req }: { req: RequestContext["req"] }) => ({ req }),
     }),
     JwtModule.registerAsync({
@@ -66,6 +68,7 @@ import {
     PedidoResolver,
     DetalleResolver,
     UsuarioResolver,
+    SubscriptionsResolver,
   ],
   controllers: [PagosController],
 })

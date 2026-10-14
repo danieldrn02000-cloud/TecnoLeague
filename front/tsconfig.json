@@ -1,1 +1,10 @@
-{"extends":"astro/tsconfigs/strict","compilerOptions":{"jsx":"react-jsx","skipLibCheck":true,"noEmit":true},"include":[".astro/types.d.ts","**/*"],"exclude":["dist"]}
+{
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [".astro/types.d.ts", "**/*"],
+  "exclude": ["dist"]
+}

@@ -301,3 +301,7 @@ type InicioPago {
 extend type Mutation {
   iniciarPago(pedidoId: Int!): InicioPago!
 }
+
+type Subcription{
+  pruebaConexion: String!
+}
