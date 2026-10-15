@@ -1,44 +1,22 @@
 ---
+import Layout from "../../layouts/Layout.astro";
+import { RetornoPago } from "../../components/RetornoPago";
+import { getSessionUser } from "../../lib/server/graphql";
+
 export const prerender = false;
+Astro.response.headers.set("Cache-Control", "no-store");
+const intentoId = Astro.url.searchParams.get("intento") ?? "";
+const { user, invalid } = await getSessionUser(Astro.cookies.get("tl_session")?.value);
+if (invalid) Astro.cookies.delete("tl_session", { path: "/" });
+const valido = /^[0-9a-f-]{36}$/i.test(intentoId);
+const next = `/pago/retorno?intento=${encodeURIComponent(intentoId)}`;
 ---
-
-<!doctype html>
-<html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Regreso del pago | TecnoLeague</title>
-  </head>
-  <body>
-    <main>
-      <h1>Has vuelto a TecnoLeague</h1>
-      <p>
-        Que bueno verte por aqui de nuevo :)
-      </p>
-      <a href="/">Volver a la tienda</a>
-    </main>
-  </body>
-</html>
-
-<style>
-  body {
-    margin: 0;
-    background: #111827;
-    color: #f9fafb;
-    font-family: system-ui, sans-serif;
-  }
-
-  main {
-    max-width: 540px;
-    margin: 80px auto;
-    padding: 24px;
-  }
-
-  p {
-    line-height: 1.6;
-  }
-
-  a {
-    color: #93c5fd;
-  }
-</style>
+<Layout title="Resultado del pago">
+  {user && valido ? <RetornoPago client:load intentoId={intentoId} usuarioId={user.id} /> :
+    <main class="panel" style="max-width:680px;margin:60px auto;padding:28px">
+      <h1>Consultar el pago</h1>
+      <p>{valido ? "Inicia sesión con la cuenta que comenzó esta compra." : "Falta una referencia de intento válida."}</p>
+      {valido && <a href={`/iniciar-sesion?next=${encodeURIComponent(next)}`}>Iniciar sesión</a>}
+      <p><a href="/">Volver a la tienda</a></p>
+    </main>}
+</Layout>

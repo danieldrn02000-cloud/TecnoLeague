@@ -9,9 +9,18 @@ import { AuthService } from "./auth.service";
 import { TiendaService } from "./tienda.service";
 import { JwtModule } from "@nestjs/jwt";
 import { PagosController } from "./pagos.controller";
-import { AdminResolver, CategoriaAdminResolver, EventoEstadoPedidoResolver, MovimientoInventarioResolver, PagoAdminResolver, PagoPedidoResolver } from "./admin.resolver";
+import {
+  AdminResolver,
+  CategoriaAdminResolver,
+  EventoEstadoPedidoResolver,
+  MovimientoInventarioResolver,
+  PagoAdminResolver,
+  PagoPedidoResolver,
+} from "./admin.resolver";
 import { AdminService } from "./admin.service";
-import {SubscriptionsResolver} from "./subscription.resolver";
+import { BackOfficeSubscriptionsResolver } from "./backoffice-subscription.resolver";
+import { SubscriptionsResolver } from "./subscription.resolver";
+import { EventosService } from "./eventos.service";
 import type { RequestContext } from "./types";
 
 import {
@@ -24,7 +33,6 @@ import {
   UsuarioResolver,
 } from "./tienda.resolver";
 
-
 @Module({
   imports: [
     GraphQLModule.forRoot<ApolloDriverConfig>({
@@ -33,20 +41,47 @@ import {
       path: "/graphql",
       graphiql: true,
       introspection: true,
-      subscriptions:{"graphql-ws":{path: "/graphql"}}, //protocolo para subcriptions
-      context: ({ req }: { req: RequestContext["req"] }) => ({ req }),
+      subscriptions: { "graphql-ws": { path: "/graphql" } }, //protocolo para subcriptions
+
+      //adaptacion de contexto, motivo:
+      //Los guards actuales buscan el token en ctx.req.headers.authorization. Las conexiones envian sus crendciales mediante websockets
+      //Demos convertir las credenciales al formato que ya utiliza el backend
+      context: ({
+        req,
+        connectionParams,
+      }: {
+        req?: RequestContext["req"];
+        connectionParams?: Record<string, unknown>;
+      }): RequestContext => {
+        // Las consultas y mutaciones HTTP conservan su contexto.
+        if (req) {
+          return { req };
+        }
+
+        // Las subscriptions reciben credenciales por WebSocket.
+        const authorization = connectionParams?.authorization;
+
+        return {
+          req: {
+            headers: {
+              authorization:
+                typeof authorization === "string" ? authorization : undefined,
+            },
+          },
+        };
+      },
     }),
     JwtModule.registerAsync({
-  useFactory: () => {
-    const secret = process.env.JWT_SECRET;
+      useFactory: () => {
+        const secret = process.env.JWT_SECRET;
 
-    if (!secret) {
-      throw new Error("Falta JWT_SECRET en el .env del backend.");
-    }
+        if (!secret) {
+          throw new Error("Falta JWT_SECRET en el .env del backend.");
+        }
 
-    return { secret };
-  },
-}),
+        return { secret };
+      },
+    }),
   ],
   providers: [
     PagosService,
@@ -69,6 +104,8 @@ import {
     DetalleResolver,
     UsuarioResolver,
     SubscriptionsResolver,
+    EventosService,
+    BackOfficeSubscriptionsResolver,
   ],
   controllers: [PagosController],
 })

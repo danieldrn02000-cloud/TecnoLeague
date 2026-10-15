@@ -1,4 +1,5 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
+import { EventosService } from "./eventos.service";
 import { Prisma } from "@prisma/client";
 import { GraphQLError } from "graphql";
 import { createHash } from "node:crypto";
@@ -15,7 +16,11 @@ const detallePedido = {
 
 @Injectable()
 export class TiendaService {
-  constructor(private readonly db: PrismaService) {}
+  private readonly logger = new Logger(TiendaService.name); //Logger permitira registrar un fallo de publicacion sin mostrar datos del pedido
+  constructor(
+    private readonly db: PrismaService,
+    private readonly eventos: EventosService,
+  ) {}
 
   categorias() {
     return this.db.categoria.findMany({
@@ -91,6 +96,7 @@ export class TiendaService {
       include: detallePedido,
     });
   }
+
   async validarProducto(datos: ProductoInput) {
     if (!datos.nombre.trim() || datos.nombre.length > 120)
       fallo("Escribe un nombre de hasta 120 caracteres.");
@@ -141,6 +147,7 @@ export class TiendaService {
       precio: new Prisma.Decimal(datos.precio.toFixed(2)),
     };
   }
+
   async crearProducto(datos: ProductoInput, actorId: number) {
     const producto = await this.validarProducto(datos);
     return this.db.$transaction(async (tx) => {
@@ -162,6 +169,7 @@ export class TiendaService {
       return creado;
     });
   }
+
   async actualizarProducto(id: number, datos: ProductoInput) {
     await this.producto(id);
     const validado = await this.validarProducto(datos);
@@ -180,12 +188,14 @@ export class TiendaService {
       include: { categoria: true },
     });
   }
+
   async eliminarProducto(id: number) {
     await this.producto(id);
     // Baja lógica: un pedido antiguo debe conservar su relación con el producto.
     await this.db.producto.update({ where: { id }, data: { activo: false } });
     return true;
   }
+
   async crearPedido(datos: PedidoInput, usuarioId: number) {
     if (datos.nombre.trim().length < 2 || datos.nombre.length > 120)
       fallo("Escribe tu nombre completo.");
@@ -238,7 +248,7 @@ export class TiendaService {
     }
     try {
       // Todo ocurre en una transacción: si falla un renglón, no se descuenta nada.
-      return await this.db.$transaction(
+      const pedidoCreado = await this.db.$transaction(
         async (tx) => {
           let total = new Prisma.Decimal(0);
           const detalles: {
@@ -303,6 +313,20 @@ export class TiendaService {
         },
         { maxWait: 10000, timeout: 15000 },
       );
+      //try catch de publicacion, evita que se mezclen errores
+      try {
+        await this.eventos.publicarBackOffice({
+          entidad: "PEDIDO",
+          entidadId: pedidoCreado.id,
+          accion: "CREADO",
+        });
+      } catch {
+        this.logger.error(
+          "El pedido fue confirmado, pero no se pudo publicar su evento.",
+        );
+      }
+
+      return pedidoCreado;
     } catch (error) {
       // Reintentar una misma compra no genera dos pedidos ni descuenta stock dos veces.
       if (

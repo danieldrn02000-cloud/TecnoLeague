@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ArrowRight, Check, ChevronDown, Package } from "lucide-react";
-import { dinero, graphql, PEDIDO, useQuery } from "../api";
+import { dinero, PEDIDO, useQuery } from "../api";
 import { Cargando, ErrorCarga, Imagen, Vacio } from "../components/ui";
 import type { Navegar, Pedido } from "../types";
 export function Pedidos({ navegar }: { navegar: Navegar }) {
@@ -8,27 +8,6 @@ export function Pedidos({ navegar }: { navegar: Navegar }) {
     `query Historial{pedidos{${PEDIDO}}}`,
   );
   const [abierto, setAbierto] = useState<number | null>(null);
-  const [pagando, setPagando] = useState<number | null>(null);
-  const [errorPago, setErrorPago] = useState("");
-
-  async function continuarPago(pedidoId: number) {
-    setPagando(pedidoId);
-    setErrorPago("");
-    try {
-      const { iniciarPago } = await graphql<{
-        iniciarPago: { checkoutUrl: string };
-      }>(
-        `mutation Pagar($pedidoId:Int!){iniciarPago(pedidoId:$pedidoId){checkoutUrl}}`,
-        { pedidoId },
-      );
-      window.location.assign(iniciarPago.checkoutUrl);
-    } catch (e) {
-      setErrorPago(
-        e instanceof Error ? e.message : "No se pudo continuar con el pago.",
-      );
-      setPagando(null);
-    }
-  }
 
   return (
     <>
@@ -58,11 +37,6 @@ export function Pedidos({ navegar }: { navegar: Navegar }) {
         />
       ) : (
         <div className="pedidos-lista">
-          {errorPago && (
-            <p className="auth-error" role="alert">
-              {errorPago}
-            </p>
-          )}
           {data.pedidos.map((p) => (
             <article className="pedido panel" key={p.id}>
               <div className="pedido-head">

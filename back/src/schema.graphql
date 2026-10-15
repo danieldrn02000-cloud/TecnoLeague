@@ -4,7 +4,7 @@ enum Rol { ADMIN CLIENTE }
 enum EstadoPedido { PENDIENTE PAGADO ENVIADO ENTREGADO CANCELADO }
 enum EstadoPago { PENDIENTE APROBADO RECHAZADO CANCELADO REEMBOLSADO }
 enum ProveedorPago { MERCADO_PAGO PAYPAL }
-enum TipoMovimientoInventario { INICIAL ENTRADA SALIDA AJUSTE PEDIDO CANCELACION }
+enum TipoMovimientoInventario { INICIAL ENTRADA SALIDA AJUSTE PEDIDO CANCELACION RESERVA LIBERACION }
 """Criterio de orden del catálogo."""
 enum OrdenProducto { RECIENTES PRECIO_ASC PRECIO_DESC }
 """Agrupa productos relacionados."""
@@ -126,6 +126,9 @@ type PaginaClientesAdmin {
   total: Int!
 }
 type PagoAdmin {
+  intentoId: ID
+  estadoIntento: EstadoIntento
+  ultimoError: String
   id: Int!
   proveedor: ProveedorPago!
   estado: EstadoPago!
@@ -136,7 +139,7 @@ type PagoAdmin {
   estadoProveedor: String
   creadoEn: String!
   aprobadoEn: String
-  pedido: PagoPedido!
+  pedido: PagoPedido
 }
 type PagoPedido {
   id: Int!
@@ -293,15 +296,59 @@ type Mutation {
   eliminarCategoria(id: Int!): Boolean!
 }
 
-"""Checkout de Mercado Pago; iniciar no equivale a aprobar el pago."""
+"""Checkout Orders: reservar no crea un pedido."""
+enum EstadoIntento { INICIADO EN_PROCESO CONFIRMADO RECHAZADO CANCELADO EXPIRADO }
+type RenglonIntento { productoId: Int!, cantidad: Int! }
+type EstadoCheckout {
+  intentoId: ID!
+  estado: EstadoIntento!
+  pedidoId: Int
+  expiraEn: String!
+  aviso: String
+  checkoutUrl: String
+  renglones: [RenglonIntento!]!
+}
 type InicioPago {
-  pagoId: Int!
-  checkoutUrl: String!
+  intentoId: ID!
+  checkoutUrl: String
+  estado: EstadoIntento!
+  pedidoId: Int
+}
+extend type Query {
+  estadoIntento(intentoId: ID!): EstadoCheckout!
+  intentoActivo: ID
 }
 extend type Mutation {
-  iniciarPago(pedidoId: Int!): InicioPago!
+  iniciarPago(datos: PedidoInput!): InicioPago!
+  cancelarIntento(intentoId: ID!): EstadoCheckout!
 }
 
-type Subcription{
+type Subscription{
   pruebaConexion: String!
+  backOfficeActualizado: EventoBackOffice!
+}
+
+"eventos que puede solicitar el cliente y que campos recibirá"
+
+enum EntidadBackOffice {
+  PEDIDO
+  PRODUCTO
+  INVENTARIO
+  CATEGORIA
+  PAGO
+}
+
+enum AccionBackOffice {
+  CREADO
+  ACTUALIZADO
+  DESACTIVADO
+  ELIMINADO
+}
+
+type EventoBackOffice {
+  eventoId: ID!
+  entidad: EntidadBackOffice!
+  entidadId: Int!
+  accion: AccionBackOffice!
+  ocurridoEn: String!
 }

@@ -385,6 +385,8 @@ export class AdminService {
               { idOrdenExterna: { contains: filtro, mode: "insensitive" } },
               { idPagoExterno: { contains: filtro, mode: "insensitive" } },
               { pedido: { email: { contains: filtro, mode: "insensitive" } } },
+              { intento: { email: { contains: filtro, mode: "insensitive" } } },
+              { intentoId: { contains: filtro, mode: "insensitive" } },
               ...( /^\d+$/.test(filtro) ? [{ id: Number(filtro) }, { pedidoId: Number(filtro) }] : []),
             ],
           }
@@ -397,6 +399,7 @@ export class AdminService {
           pedido: {
             select: { id: true, fecha: true, nombre: true, email: true, status: true },
           },
+          intento: { select: { estado: true, ultimoError: true } },
         },
         orderBy: { creadoEn: "desc" },
         skip: desde,
@@ -408,6 +411,8 @@ export class AdminService {
       items: items.map((pago) => ({
         ...pago,
         monto: Number(pago.monto),
+        estadoIntento: pago.intento?.estado ?? null,
+        ultimoError: pago.intento?.ultimoError ?? null,
       })),
       total,
     };

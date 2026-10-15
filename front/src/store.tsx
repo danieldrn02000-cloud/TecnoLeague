@@ -54,6 +54,16 @@ export function CarritoProvider({ children }: { children: ReactNode }) {
     }
   }, [lineas, listo]);
 
+  useEffect(() => {
+    const actualizar = () => setLineas(recuperar());
+    window.addEventListener("storage", actualizar);
+    window.addEventListener("tl-carrito-actualizado", actualizar);
+    return () => {
+      window.removeEventListener("storage", actualizar);
+      window.removeEventListener("tl-carrito-actualizado", actualizar);
+    };
+  }, []);
+
   function agregar(producto: Producto, cantidad = 1) {
     if (producto.stock < 1) return;
     setLineas((prev) => {

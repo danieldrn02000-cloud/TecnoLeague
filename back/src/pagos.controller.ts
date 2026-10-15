@@ -4,16 +4,18 @@ import {
   Controller,
   Headers,
   HttpCode,
+  Logger,
   Post,
   Query,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { WebhookSignatureValidator } from "mercadopago";
 import { PagosService } from "./pagos.service";
 
-//valida el endpoint mediante la firma de mercado pago
 @Controller("pagos")
 export class PagosController {
+  private readonly logger = new Logger(PagosController.name);
   constructor(private readonly pagos: PagosService) {}
 
   @Post("webhook")
@@ -21,56 +23,53 @@ export class PagosController {
   async webhook(
     @Headers("x-signature") firma: string | undefined,
     @Headers("x-request-id") requestId: string | undefined,
-    @Query("data.id") ordenId: string | undefined,
+    @Query("data.id") recursoId: string | undefined,
     @Body() body: unknown,
   ) {
     const secreto = process.env.MP_WEBHOOK_SECRET;
-
-    if (!secreto) {
-      throw new Error("Falta MP_WEBHOOK_SECRET en el backend.");
-    }
-
+    if (!secreto)
+      throw new ServiceUnavailableException(
+        "Falta MP_WEBHOOK_SECRET en el backend.",
+      );
     if (
       typeof firma !== "string" ||
       typeof requestId !== "string" ||
-      typeof ordenId !== "string" ||
-      !/^[a-zA-Z0-9_-]+$/.test(ordenId)
+      !requestId ||
+      typeof recursoId !== "string" ||
+      !/^[a-zA-Z0-9_-]{1,150}$/.test(recursoId)
     ) {
       throw new UnauthorizedException("Notificación sin firma válida.");
     }
-
-try {
-  WebhookSignatureValidator.validate({
-    xSignature: firma,
-    xRequestId: requestId,
-    dataId: ordenId.toLowerCase(),
-    secret: secreto,
-  });
-
-  console.log("Webhook: firma aceptada por el SDK oficial.");
-} catch (error) {
-  console.error(
-    "Webhook: firma rechazada por el SDK oficial:",
-    error instanceof Error
-      ? { nombre: error.name, mensaje: error.message }
-      : { mensaje: "Error de validación" },
-  );
-
-  throw new UnauthorizedException("Firma inválida.");
-}
-
-
-    const notificacion = body as {
-      type?: string;
-      data?: { id?: string };
-    } | null;
-
-    if (notificacion?.type !== "order" || notificacion.data?.id !== ordenId) {
-      throw new BadRequestException("Notificación de orden inválida.");
+    try {
+      WebhookSignatureValidator.validate({
+        xSignature: firma,
+        xRequestId: requestId,
+        dataId: recursoId.toLowerCase(),
+        secret: secreto,
+      });
+    } catch {
+      this.logger.warn("Webhook rechazado: firma inválida.");
+      throw new UnauthorizedException("Firma inválida.");
     }
-
-    await this.pagos.procesarWebhook(ordenId);
-
-    return { recibido: true };
+    const notificacion = body as {
+      type?: unknown;
+      data?: { id?: unknown };
+    } | null;
+    if (
+      typeof notificacion?.type !== "string" ||
+      !["string", "number"].includes(typeof notificacion.data?.id) ||
+      String(notificacion.data?.id) !== recursoId
+    ) {
+      throw new BadRequestException(
+        "El tipo o ID de la notificación no es válido.",
+      );
+    }
+    // 200 significa notificación atendida. El resultado explica si se confirmó,
+    // continúa pendiente, se repitió o se ignoró; los fallos temporales son 503.
+    const resultado = await this.pagos.procesarWebhook(
+      notificacion.type,
+      recursoId,
+    );
+    return { recibido: true, ...resultado };
   }
 }

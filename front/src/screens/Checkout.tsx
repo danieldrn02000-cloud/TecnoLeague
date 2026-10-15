@@ -1,10 +1,11 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, Check, Package, Truck } from "lucide-react";
-import { graphql, PEDIDO } from "../api";
+import { graphql } from "../api";
 import { useCarrito } from "../store";
 import type { AuthUser, Navegar, Pedido } from "../types";
 import { Resumen } from "./Carrito";
 import { Vacio } from "../components/ui";
+import { guardarIntento, leerIntento } from "../lib/checkout";
 export function Checkout({
   currentUser,
   navegar,
@@ -13,13 +14,27 @@ export function Checkout({
   navegar: Navegar;
   completado: (p: Pedido) => void;
 }) {
-  const { lineas, vaciar } = useCarrito();
+  const { lineas } = useCarrito();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const bloqueado = useRef(false);
-  const pedidoCreado = useRef<Pedido | null>(null);
+  const [pendiente, setPendiente] = useState<string | null>(null);
+  const [verificando, setVerificando] = useState(true);
+  useEffect(() => {
+    let activo = true;
+    const local = leerIntento(currentUser.id);
+    if (local) { setPendiente(local); setVerificando(false); return; }
+    graphql<{ intentoActivo: string | null }>("{intentoActivo}")
+      .then(({ intentoActivo }) => {
+        if (!activo) return;
+        if (intentoActivo) guardarIntento(currentUser.id, intentoActivo);
+        setPendiente(intentoActivo);
+        setVerificando(false);
+      }).catch(() => { if (activo) setError("No pudimos comprobar si tienes un pago en proceso. Vuelve a abrir el checkout."); });
+    return () => { activo = false; };
+  }, [currentUser.id]);
   const solicitud = useRef({ contenido: "", clave: "" });
-  if (!lineas.length)
+  if (!lineas.length && !pendiente)
     return (
       <Vacio
         titulo="No hay productos en el carrito"
@@ -31,7 +46,7 @@ export function Checkout({
     
   async function enviar(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-      if (bloqueado.current) return;
+      if (bloqueado.current || pendiente || verificando) return;
       bloqueado.current = true;
     setBusy(true);
     setError("");
@@ -52,20 +67,20 @@ export function Checkout({
         solicitud.current = { contenido, clave: crypto.randomUUID() };
       
     try {
-      if (!pedidoCreado.current) {
-      const { crearPedido } = await graphql<{ crearPedido: Pedido }>(
-        `mutation Comprar($datos:PedidoInput!){crearPedido(datos:$datos){${PEDIDO}}}`,
-        { datos: { ...payload, claveSolicitud: solicitud.current.clave } },
+      // La clave también es el ID del intento: sobrevive incluso si se pierde
+      // la respuesta después de que el servidor reservó stock.
+      const intentoId = solicitud.current.clave;
+      guardarIntento(currentUser.id, intentoId);
+      const { iniciarPago } = await graphql<{ iniciarPago: {
+        intentoId: string; checkoutUrl: string | null; estado: string; pedidoId: number | null;
+      } }>(
+        `mutation Pagar($datos:PedidoInput!){iniciarPago(datos:$datos){intentoId checkoutUrl estado pedidoId}}`,
+        { datos: { ...payload, claveSolicitud: intentoId } },
       );
-      pedidoCreado.current = crearPedido;
-      }
-      const { iniciarPago } = await graphql<{ iniciarPago: { pagoId: number; checkoutUrl: string } }>(
-        `mutation Pagar($pedidoId:Int!){iniciarPago(pedidoId:$pedidoId){pagoId checkoutUrl}}`,
-        { pedidoId: pedidoCreado.current.id },
-      );
-      vaciar();
-      window.location.assign(iniciarPago.checkoutUrl);
+      setPendiente(iniciarPago.intentoId);
+      window.location.assign(iniciarPago.checkoutUrl ?? `/pago/retorno?intento=${encodeURIComponent(iniciarPago.intentoId)}`);
     } catch (e) {
+      setPendiente(leerIntento(currentUser.id));
       setError(
         e instanceof Error ? e.message : "No se pudo registrar el pedido.",
       );
@@ -101,7 +116,7 @@ export function Checkout({
           <h2>
             <Truck size={22} /> Datos de entrega
           </h2>
-          <fieldset disabled={busy || !!pedidoCreado.current}>
+          <fieldset disabled={false}>
             <label>
               Nombre completo
               <input
@@ -147,6 +162,11 @@ export function Checkout({
             </div>
             <Check size={18} />
           </div>
+          {pendiente && (
+            <p role="status">Conservamos tu carrito. Antes de pagar otra vez,
+              <a href={`/pago/retorno?intento=${encodeURIComponent(pendiente)}`}> revisa el resultado de tu pago</a>.
+            </p>
+          )}
           {error && (
             <div className="form-error" role="alert">
               {error}
@@ -161,7 +181,7 @@ export function Checkout({
           )}
         </div>
         <Resumen>
-          <button type="submit" className="btn full" disabled={busy}>
+          <button type="submit" className="btn full" disabled={busy || verificando || !!pendiente}>
             {busy ? "Abriendo Mercado Pago…" : "Pagar con Mercado Pago"}
             <Check size={18} />
           </button>

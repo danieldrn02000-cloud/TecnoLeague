@@ -1244,6 +1244,9 @@ function PagosAdmin() {
         idOrdenExterna: string | null;
         idPagoExterno: string | null;
         estadoProveedor: string | null;
+        intentoId: string | null;
+        estadoIntento: string | null;
+        ultimoError: string | null;
         creadoEn: string;
         aprobadoEn: string | null;
         pedido: {
@@ -1252,11 +1255,11 @@ function PagosAdmin() {
           nombre: string;
           email: string;
           status: string;
-        };
+        } | null;
       }[];
     };
   }>(
-    "query($buscar:String!,$estado:EstadoPago,$desde:Int!){adminPagos(buscar:$buscar,estado:$estado,desde:$desde,limite:20){total items{id proveedor estado monto moneda idOrdenExterna idPagoExterno estadoProveedor creadoEn aprobadoEn pedido{id fecha nombre email status}}}}",
+    "query($buscar:String!,$estado:EstadoPago,$desde:Int!){adminPagos(buscar:$buscar,estado:$estado,desde:$desde,limite:20){total items{id proveedor estado monto moneda idOrdenExterna idPagoExterno estadoProveedor intentoId estadoIntento ultimoError creadoEn aprobadoEn pedido{id fecha nombre email status}}}}",
     { buscar, estado: estado || null, desde },
   );
   return (
@@ -1318,11 +1321,11 @@ function PagosAdmin() {
                   <tr key={p.id}>
                     <td>
                       {p.idPagoExterno || p.idOrdenExterna || `Pago #${p.id}`}
-                      <small>Pedido #{p.pedido.id}</small>
+                      <small>{p.pedido ? `Pedido #${p.pedido.id}` : "Intento sin pedido confirmado"}</small>
                     </td>
                     <td>
-                      {p.pedido.nombre}
-                      <small>{p.pedido.email}</small>
+                      {p.pedido?.nombre ?? "Checkout en proceso"}
+                      <small>{p.pedido?.email ?? ""}</small>
                     </td>
                     <td>{dinero(p.monto)}</td>
                     <td>{p.proveedor.replaceAll("_", " ")}</td>
@@ -1330,6 +1333,8 @@ function PagosAdmin() {
                     <td>
                       <Estado etiqueta={p.estado} />
                       {p.estadoProveedor && <small>{p.estadoProveedor}</small>}
+                      {p.intentoId && <small>Intento {p.intentoId}: {p.estadoIntento}</small>}
+                      {p.ultimoError && <small role="alert">{p.ultimoError}</small>}
                     </td>
                   </tr>
                 ))}

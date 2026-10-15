@@ -76,7 +76,7 @@ export default function App({
 
     window.sessionStorage.removeItem("tl-pantalla-pendiente");
 
-    if (pendiente === "checkout" || pendiente === "pedidos") {
+    if (pendiente === "checkout" || pendiente === "pedidos" || pendiente === "carrito") {
       setPantalla({ tipo: pendiente });
     }
   } catch {
@@ -138,7 +138,6 @@ useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     requestAnimationFrame(() => main.current?.focus({ preventScroll: true }));
   }
-
   function agregar(p: Producto) {
     const n = lineas.find((l) => l.producto.id === p.id)?.cantidad || 0;
     if (n >= Math.min(p.stock, 99)) {
@@ -148,7 +147,6 @@ useEffect(() => {
     agregarCarrito(p);
     avisar(`${p.nombre} agregado al carrito`);
   }
-  
   const catalogo = pantalla.tipo === "inicio" || pantalla.tipo === "catalogo";
   const categoriaId =
     pantalla.tipo === "catalogo" ? pantalla.categoriaId : undefined;
