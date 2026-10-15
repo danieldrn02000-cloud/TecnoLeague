@@ -18,7 +18,9 @@
     "db:migrate": "npm run db:migrate -w back",
     "db:seed": "npm run db:seed -w back",
     "db:studio": "npm run db:studio -w back",
-    "test:api": "node scripts/test-api.mjs"
+    "test:api": "node scripts/test-api.mjs",
+    "test:subscriptions": "npm run build -w back && node --test back/test/*.test.cjs",
+    "test:checkout": "node --test scripts/test-checkout-recuperacion.cjs"
   },
   "devDependencies": {
     "concurrently": "9.2.4",

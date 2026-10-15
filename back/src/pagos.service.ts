@@ -1,3 +1,4 @@
+import { EventosService, EventoBackOffice } from "./eventos.service";
 import {
   Injectable,
   Logger,
@@ -37,7 +38,18 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PagosService.name);
   private timer?: ReturnType<typeof setInterval>;
   private revisando = false;
-  constructor(private readonly db: PrismaService) {}
+  constructor(private readonly db: PrismaService, private readonly eventos: EventosService) {}
+
+  // Acumula avisos durante la transacción y publica solamente si el commit termina.
+  private async conEventos<T>(
+    trabajo: (tx: Prisma.TransactionClient, emitir: (evento: Pick<EventoBackOffice, "entidad" | "entidadId" | "accion">) => void) => Promise<T>,
+    opciones: { maxWait?: number; timeout?: number },
+  ): Promise<T> {
+    const avisos: Pick<EventoBackOffice, "entidad" | "entidadId" | "accion">[] = [];
+    const resultado = await this.db.$transaction(tx => trabajo(tx, e => avisos.push(e)), opciones);
+    for (const aviso of avisos) await this.eventos.publicarBackOffice(aviso);
+    return resultado;
+  }
 
   onModuleInit() {
     // Un proceso Nest persistente concilia también si nadie regresa del checkout.
@@ -133,8 +145,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     const huella = createHash("sha256")
       .update(JSON.stringify({ usuarioId, ...contacto, renglones }))
       .digest("hex");
-    const intento = await this.db.$transaction(
-      async (tx) => {
+    const intento = await this.conEventos(
+      async (tx, emitir) => {
         // La misma clave concurrente reserva una sola vez, incluso entre instancias.
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(7241, hashtext(${datos.claveSolicitud}))::text`;
         const previo = await tx.intentoCompra.findUnique({
@@ -235,6 +247,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
             motivo: `Reserva de checkout ${id}`,
           })),
         });
+        if (nuevo.pago) emitir({ entidad: "PAGO", entidadId: nuevo.pago.id, accion: "CREADO" });
+        for (const d of detalles) emitir({ entidad: "INVENTARIO", entidadId: d.productoId, accion: "ACTUALIZADO" });
         return nuevo;
       },
       { maxWait: 10000, timeout: 15000 },
@@ -280,8 +294,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
   private async prepararOrden(id: string) {
     // Guarda exactamente el payload antes de la llamada externa. Un timeout se
     // resuelve reenviándolo con la MISMA clave, nunca creando otro cobro.
-    await this.db.$transaction(
-      async (tx) => {
+    await this.conEventos(
+      async (tx, emitir) => {
         await tx.$queryRaw`SELECT id FROM intentos_compra WHERE id = ${id} FOR UPDATE`;
         const intento = await tx.intentoCompra.findUniqueOrThrow({
           where: { id },
@@ -325,6 +339,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
           where: { id },
           data: { checkoutUrl: url.href, ultimoError: null },
         });
+        emitir({ entidad: "PAGO", entidadId: intento.pago.id, accion: "ACTUALIZADO" });
       },
       { maxWait: 10000, timeout: 25000 },
     );
@@ -471,8 +486,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async conciliar(id: string, cancelar = false) {
-    return this.db.$transaction(
-      async (tx) => {
+    return this.conEventos(
+      async (tx, emitir) => {
         // Consulta a MP dentro del bloqueo: dos respuestas concurrentes no pueden
         // aplicar estados leídos en orden inverso ni crear dos pedidos.
         await tx.$queryRaw`SELECT id FROM intentos_compra WHERE id = ${id} FOR UPDATE`;
@@ -552,6 +567,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
                 : {}),
             },
           });
+          if (pago.estadoProveedor !== estadoProveedor || (orden.status === "refunded" && pago.estado !== "REEMBOLSADO"))
+            emitir({ entidad: "PAGO", entidadId: pago.id, accion: "ACTUALIZADO" });
           return "YA_CONFIRMADO";
         }
         if (acreditado()) {
@@ -628,6 +645,11 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
               motivo: "Pago acreditado verificado con Mercado Pago",
             },
           });
+          emitir({ entidad: "PEDIDO", entidadId: pedido.id, accion: "CREADO" });
+          emitir({ entidad: "PAGO", entidadId: pago.id, accion: "ACTUALIZADO" });
+          if (!intento.reservaActiva) {
+            for (const d of intento.detalles) emitir({ entidad: "INVENTARIO", entidadId: d.productoId, accion: "ACTUALIZADO" });
+          }
           return "CONFIRMADO";
         }
         if (terminal()) {
@@ -673,6 +695,12 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
               estadoProveedor,
             },
           });
+          const estadoPago = orden.status === "refunded" ? "REEMBOLSADO" : estado === "RECHAZADO" ? "RECHAZADO" : "CANCELADO";
+          if (pago.estado !== estadoPago || pago.estadoProveedor !== estadoProveedor)
+            emitir({ entidad: "PAGO", entidadId: pago.id, accion: "ACTUALIZADO" });
+          if (intento.reservaActiva) {
+            for (const d of intento.detalles) emitir({ entidad: "INVENTARIO", entidadId: d.productoId, accion: "ACTUALIZADO" });
+          }
           return estado;
         }
         await tx.pago.update({
@@ -687,6 +715,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
             proximaRevision: new Date(Date.now() + 60_000),
           },
         });
+        if (pago.estadoProveedor !== estadoProveedor)
+          emitir({ entidad: "PAGO", entidadId: pago.id, accion: "ACTUALIZADO" });
         return "EN_PROCESO";
       },
       { maxWait: 10000, timeout: 45000 },
@@ -694,8 +724,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async conciliarLegacy(ordenId: string) {
-    return this.db.$transaction(
-      async (tx) => {
+    return this.conEventos(
+      async (tx, emitir) => {
         await tx.$queryRaw`SELECT id FROM pagos WHERE id_orden_externa = ${ordenId} FOR UPDATE`;
         const pago = await tx.pago.findUniqueOrThrow({
           where: { idOrdenExterna: ordenId },
@@ -733,10 +763,12 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
                 estadoProveedor: "processed:accredited",
               },
             });
-            await tx.pedido.updateMany({
+            const cambioPedido = await tx.pedido.updateMany({
               where: { id: pago.pedidoId!, status: "PENDIENTE" },
               data: { status: "PAGADO" },
             });
+            emitir({ entidad: "PAGO", entidadId: pago.id, accion: "ACTUALIZADO" });
+            if (cambioPedido.count) emitir({ entidad: "PEDIDO", entidadId: pago.pedidoId!, accion: "ACTUALIZADO" });
           }
           return { resultado: "LEGACY_VERIFICADO" };
         }
@@ -744,6 +776,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
           where: { id: pago.id },
           data: { estadoProveedor: `${orden.status}:${orden.status_detail}` },
         });
+        if (pago.estadoProveedor !== `${orden.status}:${orden.status_detail}`)
+          emitir({ entidad: "PAGO", entidadId: pago.id, accion: "ACTUALIZADO" });
         return { resultado: "LEGACY_EN_PROCESO" };
       },
       { timeout: 25000 },

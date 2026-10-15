@@ -1,3 +1,4 @@
+import { EventosService } from "./eventos.service";
 import { Injectable } from "@nestjs/common";
 import {
   EstadoPago,
@@ -33,7 +34,7 @@ function periodo(desde: string, hasta: string) {
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly db: PrismaService) {}
+  constructor(private readonly db: PrismaService, private readonly eventos: EventosService) {}
 
   async dashboard(desde: string, hasta: string) {
     const rango = periodo(desde, hasta);
@@ -185,7 +186,7 @@ export class AdminService {
     if (!Number.isInteger(id) || id < 1) fallo("Pedido inválido.");
     const motivoLimpio = motivo?.trim() ?? "";
     if (motivoLimpio.length > 300) fallo("El motivo no puede superar 300 caracteres.");
-    return this.db.$transaction(async (tx) => {
+    const resultado = await this.db.$transaction(async (tx) => {
       const pedido = await tx.pedido.findUnique({
         where: { id },
         include: { detalles: true, pagos: true },
@@ -251,6 +252,13 @@ export class AdminService {
         include: incluirPedido,
       });
     });
+    await this.eventos.publicarBackOffice({ entidad: "PEDIDO", entidadId: id, accion: "ACTUALIZADO" });
+    if (nuevoEstado === "CANCELADO") {
+      for (const productoId of new Set(resultado.detalles.map(d => d.productoId))) {
+        await this.eventos.publicarBackOffice({ entidad: "INVENTARIO", entidadId: productoId, accion: "ACTUALIZADO" });
+      }
+    }
+    return resultado;
   }
 
   async pedido(id: number) {
@@ -459,7 +467,7 @@ export class AdminService {
       fallo("Indica un motivo de entre 3 y 300 caracteres.");
     }
     const delta = tipo === "ENTRADA" ? cantidad : -cantidad;
-    return this.db.$transaction(async (tx) => {
+    const resultado = await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM productos WHERE id = ${productoId} FOR UPDATE`;
       const actual = await tx.producto.findUnique({ where: { id: productoId } });
       if (!actual || !actual.activo) fallo("El producto no existe o está inactivo.");
@@ -482,6 +490,8 @@ export class AdminService {
       });
       return updated;
     });
+    await this.eventos.publicarBackOffice({ entidad: "INVENTARIO", entidadId: productoId, accion: "ACTUALIZADO" });
+    return resultado;
   }
 
   async categorias() {
@@ -495,10 +505,12 @@ export class AdminService {
     const limpio = nombre.trim();
     if (limpio.length < 2 || limpio.length > 80) fallo("El nombre debe tener de 2 a 80 caracteres.");
     try {
-      return await this.db.categoria.create({
+      const categoria = await this.db.categoria.create({
         data: { nombre: limpio },
         include: { _count: { select: { productos: true } } },
       });
+      await this.eventos.publicarBackOffice({ entidad: "CATEGORIA", entidadId: categoria.id, accion: "CREADO" });
+      return categoria;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         fallo("Ya existe una categoría con ese nombre.");
@@ -514,11 +526,13 @@ export class AdminService {
       fallo("El nombre debe tener de 2 a 80 caracteres.");
     }
     try {
-      return await this.db.categoria.update({
+      const categoria = await this.db.categoria.update({
         where: { id },
         data: { nombre: limpio },
         include: { _count: { select: { productos: true } } },
       });
+      await this.eventos.publicarBackOffice({ entidad: "CATEGORIA", entidadId: categoria.id, accion: "ACTUALIZADO" });
+      return categoria;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         fallo("Ya existe una categoría con ese nombre.");
@@ -535,6 +549,7 @@ export class AdminService {
     if (productos) fallo("No se puede eliminar una categoría que contiene productos.");
     try {
       await this.db.categoria.delete({ where: { id } });
+      await this.eventos.publicarBackOffice({ entidad: "CATEGORIA", entidadId: id, accion: "ELIMINADO" });
       return true;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
