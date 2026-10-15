@@ -5,6 +5,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": [".astro/types.d.ts", "**/*"],
+  "include": [".astro/types.d.ts", "**/*", "../scripts/test-checkout-recuperacion.cjs"],
   "exclude": ["dist"]
 }

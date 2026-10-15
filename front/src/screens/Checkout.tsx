@@ -6,6 +6,7 @@ import type { AuthUser, Navegar, Pedido } from "../types";
 import { Resumen } from "./Carrito";
 import { Vacio } from "../components/ui";
 import { guardarIntento, leerIntento } from "../lib/checkout";
+import { verificarCheckout } from "../lib/verificar-checkout";
 export function Checkout({
   currentUser,
   navegar,
@@ -20,33 +21,46 @@ export function Checkout({
   const bloqueado = useRef(false);
   const [pendiente, setPendiente] = useState<string | null>(null);
   const [verificando, setVerificando] = useState(true);
+  const [falloVerificacion, setFalloVerificacion] = useState(false);
+  const [aviso, setAviso] = useState("");
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     let activo = true;
-    const local = leerIntento(currentUser.id);
-    if (local) { setPendiente(local); setVerificando(false); return; }
-    graphql<{ intentoActivo: string | null }>("{intentoActivo}")
-      .then(({ intentoActivo }) => {
+    setVerificando(true);
+    setFalloVerificacion(false);
+    setError("");
+    setPendiente(leerIntento(currentUser.id));
+    verificarCheckout(currentUser.id)
+      .then(resultado => {
         if (!activo) return;
-        if (intentoActivo) guardarIntento(currentUser.id, intentoActivo);
-        setPendiente(intentoActivo);
-        setVerificando(false);
-      }).catch(() => { if (activo) setError("No pudimos comprobar si tienes un pago en proceso. Vuelve a abrir el checkout."); });
+        setPendiente(resultado.pendiente);
+        setAviso(resultado.aviso);
+      })
+      .catch(error => {
+        if (!activo) return;
+        setFalloVerificacion(true);
+        setError(`No pudimos comprobar tus pagos. ${error instanceof Error ? error.message : "Reintenta la comprobación."}`);
+      })
+      .finally(() => { if (activo) setVerificando(false); });
     return () => { activo = false; };
-  }, [currentUser.id]);
+  }, [currentUser.id, revision]);
   const solicitud = useRef({ contenido: "", clave: "" });
-  if (!lineas.length && !pendiente)
+  if (!lineas.length && !pendiente && !verificando && !falloVerificacion)
     return (
+      <>
+      {aviso && <p role="status">{aviso}</p>}
       <Vacio
         titulo="No hay productos en el carrito"
         texto="Agrega un producto para continuar."
         accion="Ver catálogo"
         onClick={() => navegar({ tipo: "catalogo" })}
       />
+      </>
     );
-    
+
   async function enviar(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-      if (bloqueado.current || pendiente || verificando) return;
+      if (bloqueado.current || pendiente || verificando || falloVerificacion || !lineas.length) return;
       bloqueado.current = true;
     setBusy(true);
     setError("");
@@ -80,10 +94,24 @@ export function Checkout({
       setPendiente(iniciarPago.intentoId);
       window.location.assign(iniciarPago.checkoutUrl ?? `/pago/retorno?intento=${encodeURIComponent(iniciarPago.intentoId)}`);
     } catch (e) {
-      setPendiente(leerIntento(currentUser.id));
-      setError(
-        e instanceof Error ? e.message : "No se pudo registrar el pedido.",
-      );
+      const mensaje = e instanceof Error ? e.message : "No se pudo iniciar el pago.";
+      setError(mensaje);
+      // Mantener la clave ante una respuesta incierta; consultar su existencia
+      // antes de permitir otra compra. Un rechazo anterior a crear el intento
+      // no debe dejar un ID fantasma bloqueando el checkout.
+      setVerificando(true);
+      try {
+        const resultado = await verificarCheckout(currentUser.id);
+        setPendiente(resultado.pendiente);
+        setAviso(resultado.aviso);
+        setFalloVerificacion(false);
+      } catch (error) {
+        setPendiente(leerIntento(currentUser.id));
+        setFalloVerificacion(true);
+        setError(`${mensaje} No pudimos verificar el resultado: ${error instanceof Error ? error.message : "reintenta la comprobación."}`);
+      } finally {
+        setVerificando(false);
+      }
     } finally {
       bloqueado.current = false;
       setBusy(false);
@@ -116,7 +144,7 @@ export function Checkout({
           <h2>
             <Truck size={22} /> Datos de entrega
           </h2>
-          <fieldset disabled={false}>
+          <fieldset disabled={busy}>
             <label>
               Nombre completo
               <input
@@ -162,14 +190,22 @@ export function Checkout({
             </div>
             <Check size={18} />
           </div>
+          {aviso && <p role="status">{aviso}</p>}
+          {verificando && <p role="status">Comprobando el estado de tus pagos…</p>}
           {pendiente && (
-            <p role="status">Conservamos tu carrito. Antes de pagar otra vez,
+            <p role="status">Conservamos la referencia de un pago. Antes de pagar otra vez,
               <a href={`/pago/retorno?intento=${encodeURIComponent(pendiente)}`}> revisa el resultado de tu pago</a>.
             </p>
           )}
           {error && (
             <div className="form-error" role="alert">
               {error}
+              {falloVerificacion && <button
+                type="button"
+                className="text-btn"
+                disabled={verificando || busy}
+                onClick={() => setRevision(n => n + 1)}
+              >Reintentar comprobación</button>}
               <button
                 type="button"
                 className="text-btn"
@@ -179,10 +215,16 @@ export function Checkout({
               </button>
             </div>
           )}
+          {pendiente && !verificando && <button
+            type="button"
+            className="text-btn"
+            disabled={busy}
+            onClick={() => setRevision(n => n + 1)}
+          >Actualizar estado del pago</button>}
         </div>
         <Resumen>
-          <button type="submit" className="btn full" disabled={busy || verificando || !!pendiente}>
-            {busy ? "Abriendo Mercado Pago…" : "Pagar con Mercado Pago"}
+          <button type="submit" className="btn full" disabled={busy || verificando || falloVerificacion || !!pendiente || !lineas.length}>
+            {busy ? "Procesando solicitud…" : verificando ? "Comprobando pagos…" : "Pagar con Mercado Pago"}
             <Check size={18} />
           </button>
           <p className="muted text-sm">
