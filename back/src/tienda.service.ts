@@ -81,6 +81,7 @@ export class TiendaService {
     ]);
     return { items, total };
   }
+
   async producto(id: number) {
     return (
       (await this.db.producto.findFirst({
@@ -148,9 +149,10 @@ export class TiendaService {
     };
   }
 
+  //cambios para las notificaciones de tal manera que se puedan publicar altas, modificaciones y bajas de productos
   async crearProducto(datos: ProductoInput, actorId: number) {
     const producto = await this.validarProducto(datos);
-    return this.db.$transaction(async (tx) => {
+    const resultado = await this.db.$transaction(async (tx) => {
       const creado = await tx.producto.create({
         data: producto,
         include: { categoria: true },
@@ -168,12 +170,24 @@ export class TiendaService {
       }
       return creado;
     });
+    await this.eventos.publicarBackOffice({
+      entidad: "PRODUCTO",
+      entidadId: resultado.id,
+      accion: "CREADO",
+    });
+    if (resultado.stock > 0)
+      await this.eventos.publicarBackOffice({
+        entidad: "INVENTARIO",
+        entidadId: resultado.id,
+        accion: "ACTUALIZADO",
+      });
+    return resultado;
   }
 
   async actualizarProducto(id: number, datos: ProductoInput) {
     await this.producto(id);
     const validado = await this.validarProducto(datos);
-    return this.db.producto.update({
+    const resultado = await this.db.producto.update({
       where: { id },
       data: {
         nombre: validado.nombre,
@@ -187,12 +201,28 @@ export class TiendaService {
       },
       include: { categoria: true },
     });
+
+    //notificacion de producto actualizado
+    await this.eventos.publicarBackOffice({
+      entidad: "PRODUCTO",
+      entidadId: id,
+      accion: "ACTUALIZADO",
+    });
+
+    return resultado;
   }
 
   async eliminarProducto(id: number) {
     await this.producto(id);
     // Baja lógica: un pedido antiguo debe conservar su relación con el producto.
     await this.db.producto.update({ where: { id }, data: { activo: false } });
+    //notificacion de producto desactivado
+    await this.eventos.publicarBackOffice({
+      entidad: "PRODUCTO",
+      entidadId: id,
+      accion: "DESACTIVADO",
+    });
+
     return true;
   }
 
@@ -324,6 +354,15 @@ export class TiendaService {
         this.logger.error(
           "El pedido fue confirmado, pero no se pudo publicar su evento.",
         );
+      }
+
+      //notificacion de pedido creado
+      for (const [productoId] of renglones) {
+        await this.eventos.publicarBackOffice({
+          entidad: "INVENTARIO",
+          entidadId: productoId,
+          accion: "ACTUALIZADO",
+        });
       }
 
       return pedidoCreado;

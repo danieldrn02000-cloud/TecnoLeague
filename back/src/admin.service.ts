@@ -8,6 +8,7 @@ import {
 import { GraphQLError } from "graphql";
 import { PrismaService } from "./prisma.service";
 import { fallo } from "./tienda.service";
+import { EventosService } from "./eventos.service";
 
 const incluirPedido = {
   detalles: { include: { producto: { include: { categoria: true } } } },
@@ -15,8 +16,13 @@ const incluirPedido = {
 } as const;
 
 function validarPagina(limite: number, desde: number) {
-  if (!Number.isInteger(limite) || limite < 1 || limite > 100 ||
-      !Number.isInteger(desde) || desde < 0) {
+  if (
+    !Number.isInteger(limite) ||
+    limite < 1 ||
+    limite > 100 ||
+    !Number.isInteger(desde) ||
+    desde < 0
+  ) {
     fallo("Paginación inválida: límite de 1 a 100 y desde mayor o igual a 0.");
   }
 }
@@ -24,8 +30,12 @@ function validarPagina(limite: number, desde: number) {
 function periodo(desde: string, hasta: string) {
   const inicio = new Date(desde);
   const fin = new Date(hasta);
-  if (!Number.isFinite(inicio.getTime()) || !Number.isFinite(fin.getTime()) ||
-      inicio > fin || fin.getTime() - inicio.getTime() > 366 * 86400000) {
+  if (
+    !Number.isFinite(inicio.getTime()) ||
+    !Number.isFinite(fin.getTime()) ||
+    inicio > fin ||
+    fin.getTime() - inicio.getTime() > 366 * 86400000
+  ) {
     fallo("El periodo de consulta no es válido (máximo 366 días).");
   }
   return { gte: inicio, lte: fin };
@@ -33,35 +43,48 @@ function periodo(desde: string, hasta: string) {
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly db: PrismaService) {}
+  constructor(
+    private readonly db: PrismaService,
+    private readonly eventos: EventosService, //agregamos eventos al constructor
+  ) {}
 
   async dashboard(desde: string, hasta: string) {
     const rango = periodo(desde, hasta);
     const where = { fecha: rango };
-    const [pedidos, pedidosPendientes, productosActivos, sinExistencias, pedidosRecientes, movimientosRecientes, ventas, productosConStockBajo] =
-      await this.db.$transaction([
-        this.db.pedido.count({ where }),
-        this.db.pedido.count({
-          where: { ...where, status: { in: ["PENDIENTE", "PAGADO"] } },
-        }),
-        this.db.producto.count({ where: { activo: true } }),
-        this.db.producto.count({ where: { activo: true, stock: 0 } }),
-        this.db.pedido.findMany({
-          orderBy: { fecha: "desc" },
-          take: 8,
-          include: incluirPedido,
-        }),
-        this.db.movimientoInventario.findMany({
-          orderBy: { creadoEn: "desc" },
-          take: 8,
-          include: {
-            producto: { include: { categoria: true } },
-            usuario: { select: { id: true, nombre: true, email: true, rol: true } },
+    const [
+      pedidos,
+      pedidosPendientes,
+      productosActivos,
+      sinExistencias,
+      pedidosRecientes,
+      movimientosRecientes,
+      ventas,
+      productosConStockBajo,
+    ] = await this.db.$transaction([
+      this.db.pedido.count({ where }),
+      this.db.pedido.count({
+        where: { ...where, status: { in: ["PENDIENTE", "PAGADO"] } },
+      }),
+      this.db.producto.count({ where: { activo: true } }),
+      this.db.producto.count({ where: { activo: true, stock: 0 } }),
+      this.db.pedido.findMany({
+        orderBy: { fecha: "desc" },
+        take: 8,
+        include: incluirPedido,
+      }),
+      this.db.movimientoInventario.findMany({
+        orderBy: { creadoEn: "desc" },
+        take: 8,
+        include: {
+          producto: { include: { categoria: true } },
+          usuario: {
+            select: { id: true, nombre: true, email: true, rol: true },
           },
-        }),
-        this.db.$queryRaw<{ fecha: string; total: string }[]>`
+        },
+      }),
+      this.db.$queryRaw<{ fecha: string; total: string }[]>`
           SELECT TO_CHAR("fecha" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS fecha,
-                 COALESCE(SUM("total"), 0)::text AS total
+                COALESCE(SUM("total"), 0)::text AS total
           FROM "pedidos"
           WHERE "fecha" >= ${rango.gte}
             AND "fecha" <= ${rango.lte}
@@ -77,24 +100,28 @@ export class AdminService {
             )
           GROUP BY 1 ORDER BY 1
         `,
-        this.db.$queryRaw<{ count: number }[]>`
+      this.db.$queryRaw<{ count: number }[]>`
           SELECT COUNT(*)::int AS count
           FROM "productos"
           WHERE "activo" = true AND "stock" > 0
             AND "stock" <= "stock_minimo"
         `,
-      ]);
+    ]);
     const dias = new Map<string, number>();
-    const cursor = new Date(Date.UTC(
-      rango.gte.getUTCFullYear(),
-      rango.gte.getUTCMonth(),
-      rango.gte.getUTCDate(),
-    ));
-    const ultimoDia = new Date(Date.UTC(
-      rango.lte.getUTCFullYear(),
-      rango.lte.getUTCMonth(),
-      rango.lte.getUTCDate(),
-    ));
+    const cursor = new Date(
+      Date.UTC(
+        rango.gte.getUTCFullYear(),
+        rango.gte.getUTCMonth(),
+        rango.gte.getUTCDate(),
+      ),
+    );
+    const ultimoDia = new Date(
+      Date.UTC(
+        rango.lte.getUTCFullYear(),
+        rango.lte.getUTCMonth(),
+        rango.lte.getUTCDate(),
+      ),
+    );
     while (cursor <= ultimoDia) {
       dias.set(cursor.toISOString().slice(0, 10), 0);
       cursor.setUTCDate(cursor.getUTCDate() + 1);
@@ -111,7 +138,10 @@ export class AdminService {
       productosActivos,
       stockBajo: productosConStockBajo[0]?.count ?? 0,
       sinExistencias,
-      ventasPorDia: [...dias.entries()].map(([fecha, total]) => ({ fecha, total })),
+      ventasPorDia: [...dias.entries()].map(([fecha, total]) => ({
+        fecha,
+        total,
+      })),
       pedidosRecientes,
       movimientosRecientes,
     };
@@ -140,11 +170,13 @@ export class AdminService {
       const inicio = fechaDesde
         ? new Date(`${fechaDesde}T00:00:00.000Z`)
         : new Date(ahora.getTime() - 366 * 86400000);
-      const fin = fechaHasta
-        ? new Date(`${fechaHasta}T23:59:59.999Z`)
-        : ahora;
-      if (!Number.isFinite(inicio.getTime()) || !Number.isFinite(fin.getTime()) ||
-          inicio > fin || fin.getTime() - inicio.getTime() > 366 * 86400000) {
+      const fin = fechaHasta ? new Date(`${fechaHasta}T23:59:59.999Z`) : ahora;
+      if (
+        !Number.isFinite(inicio.getTime()) ||
+        !Number.isFinite(fin.getTime()) ||
+        inicio > fin ||
+        fin.getTime() - inicio.getTime() > 366 * 86400000
+      ) {
         fallo("El periodo de búsqueda no es válido (máximo 366 días).");
       }
       fechas = { gte: inicio, lte: fin };
@@ -184,8 +216,9 @@ export class AdminService {
   ) {
     if (!Number.isInteger(id) || id < 1) fallo("Pedido inválido.");
     const motivoLimpio = motivo?.trim() ?? "";
-    if (motivoLimpio.length > 300) fallo("El motivo no puede superar 300 caracteres.");
-    return this.db.$transaction(async (tx) => {
+    if (motivoLimpio.length > 300)
+      fallo("El motivo no puede superar 300 caracteres.");
+    const resultado = await this.db.$transaction(async (tx) => {
       const pedido = await tx.pedido.findUnique({
         where: { id },
         include: { detalles: true, pagos: true },
@@ -199,25 +232,38 @@ export class AdminService {
         CANCELADO: [],
       };
       if (!transiciones[pedido.status].includes(nuevoEstado)) {
-        fallo(`No se permite cambiar el pedido de ${pedido.status} a ${nuevoEstado}.`);
+        fallo(
+          `No se permite cambiar el pedido de ${pedido.status} a ${nuevoEstado}.`,
+        );
       }
-      if (nuevoEstado === "ENVIADO" &&
-          pedido.status !== "PAGADO" &&
-          pedido.metodoPago !== "PAGO_AL_RECIBIR") {
-        fallo("No se puede enviar un pedido cuyo pago en línea no esté aprobado.");
+      if (
+        nuevoEstado === "ENVIADO" &&
+        pedido.status !== "PAGADO" &&
+        pedido.metodoPago !== "PAGO_AL_RECIBIR"
+      ) {
+        fallo(
+          "No se puede enviar un pedido cuyo pago en línea no esté aprobado.",
+        );
       }
-      if (nuevoEstado === "CANCELADO" &&
-          (pedido.metodoPago !== "PAGO_AL_RECIBIR" || pedido.pagos.length > 0)) {
-        fallo("Los pedidos con pago en línea requieren completar su flujo de cancelación o reembolso.");
+      if (
+        nuevoEstado === "CANCELADO" &&
+        (pedido.metodoPago !== "PAGO_AL_RECIBIR" || pedido.pagos.length > 0)
+      ) {
+        fallo(
+          "Los pedidos con pago en línea requieren completar su flujo de cancelación o reembolso.",
+        );
       }
       const cambio = await tx.pedido.updateMany({
         where: { id, status: pedido.status },
         data: { status: nuevoEstado },
       });
       if (!cambio.count) {
-        throw new GraphQLError("El pedido cambió en otra operación. Actualiza la vista.", {
-          extensions: { code: "CONFLICT" },
-        });
+        throw new GraphQLError(
+          "El pedido cambió en otra operación. Actualiza la vista.",
+          {
+            extensions: { code: "CONFLICT" },
+          },
+        );
       }
       await tx.eventoEstadoPedido.create({
         data: {
@@ -251,6 +297,25 @@ export class AdminService {
         include: incluirPedido,
       });
     });
+    //notificacion de pedido actualizado
+    await this.eventos.publicarBackOffice({
+      entidad: "PEDIDO",
+      entidadId: id,
+      accion: "ACTUALIZADO",
+    });
+    if (nuevoEstado === "CANCELADO") {
+      //set evita repetir una notificacion para el mismo producto
+      for (const productoId of new Set(
+        resultado.detalles.map((d) => d.productoId),
+      )) {
+        await this.eventos.publicarBackOffice({
+          entidad: "INVENTARIO",
+          entidadId: productoId,
+          accion: "ACTUALIZADO",
+        });
+      }
+    }
+    return resultado;
   }
 
   async pedido(id: number) {
@@ -272,7 +337,7 @@ export class AdminService {
             OR: [
               { nombre: { contains: filtro, mode: "insensitive" } },
               { email: { contains: filtro, mode: "insensitive" } },
-              ...( /^\d+$/.test(filtro) ? [{ id: Number(filtro) }] : []),
+              ...(/^\d+$/.test(filtro) ? [{ id: Number(filtro) }] : []),
             ],
           }
         : {}),
@@ -315,7 +380,9 @@ export class AdminService {
           _sum: { total: true },
         })
       : [];
-    const gastos = new Map(totales.map((item) => [item.usuarioId, Number(item._sum.total ?? 0)]));
+    const gastos = new Map(
+      totales.map((item) => [item.usuarioId, Number(item._sum.total ?? 0)]),
+    );
     return {
       items: usuarios.map((usuario) => ({
         id: usuario.id,
@@ -375,8 +442,15 @@ export class AdminService {
   async pagos(buscar = "", estado?: string, desde = 0, limite = 20) {
     validarPagina(limite, desde);
     const filtro = buscar.trim();
-    const estados = ["PENDIENTE", "APROBADO", "RECHAZADO", "CANCELADO", "REEMBOLSADO"];
-    if (estado && !estados.includes(estado)) fallo("El estado de pago no es válido.");
+    const estados = [
+      "PENDIENTE",
+      "APROBADO",
+      "RECHAZADO",
+      "CANCELADO",
+      "REEMBOLSADO",
+    ];
+    if (estado && !estados.includes(estado))
+      fallo("El estado de pago no es válido.");
     const where: Prisma.PagoWhereInput = {
       ...(estado ? { estado: estado as EstadoPago } : {}),
       ...(filtro
@@ -387,7 +461,9 @@ export class AdminService {
               { pedido: { email: { contains: filtro, mode: "insensitive" } } },
               { intento: { email: { contains: filtro, mode: "insensitive" } } },
               { intentoId: { contains: filtro, mode: "insensitive" } },
-              ...( /^\d+$/.test(filtro) ? [{ id: Number(filtro) }, { pedidoId: Number(filtro) }] : []),
+              ...(/^\d+$/.test(filtro)
+                ? [{ id: Number(filtro) }, { pedidoId: Number(filtro) }]
+                : []),
             ],
           }
         : {}),
@@ -397,7 +473,13 @@ export class AdminService {
         where,
         include: {
           pedido: {
-            select: { id: true, fecha: true, nombre: true, email: true, status: true },
+            select: {
+              id: true,
+              fecha: true,
+              nombre: true,
+              email: true,
+              status: true,
+            },
           },
           intento: { select: { estado: true, ultimoError: true } },
         },
@@ -428,7 +510,9 @@ export class AdminService {
         where,
         include: {
           producto: { include: { categoria: true } },
-          usuario: { select: { id: true, nombre: true, email: true, rol: true } },
+          usuario: {
+            select: { id: true, nombre: true, email: true, rol: true },
+          },
         },
         orderBy: { creadoEn: "desc" },
         skip: desde,
@@ -446,11 +530,18 @@ export class AdminService {
     motivo: string,
     actorId: number,
   ) {
-    if (!Number.isInteger(productoId) || productoId < 1) fallo("Producto inválido.");
-    if (!Number.isInteger(cantidad) || cantidad < (tipo === "AJUSTE" ? 0 : 1) || cantidad > 100000) {
-      fallo(tipo === "AJUSTE"
-        ? "La existencia final debe ser un entero entre 0 y 100000."
-        : "La cantidad debe ser un entero entre 1 y 100000.");
+    if (!Number.isInteger(productoId) || productoId < 1)
+      fallo("Producto inválido.");
+    if (
+      !Number.isInteger(cantidad) ||
+      cantidad < (tipo === "AJUSTE" ? 0 : 1) ||
+      cantidad > 100000
+    ) {
+      fallo(
+        tipo === "AJUSTE"
+          ? "La existencia final debe ser un entero entre 0 y 100000."
+          : "La cantidad debe ser un entero entre 1 y 100000.",
+      );
     }
     if (!["ENTRADA", "SALIDA", "AJUSTE"].includes(tipo)) {
       fallo("Selecciona un tipo de ajuste válido.");
@@ -459,10 +550,13 @@ export class AdminService {
       fallo("Indica un motivo de entre 3 y 300 caracteres.");
     }
     const delta = tipo === "ENTRADA" ? cantidad : -cantidad;
-    return this.db.$transaction(async (tx) => {
+    const resultado = await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM productos WHERE id = ${productoId} FOR UPDATE`;
-      const actual = await tx.producto.findUnique({ where: { id: productoId } });
-      if (!actual || !actual.activo) fallo("El producto no existe o está inactivo.");
+      const actual = await tx.producto.findUnique({
+        where: { id: productoId },
+      });
+      if (!actual || !actual.activo)
+        fallo("El producto no existe o está inactivo.");
       const stockNuevo = tipo === "AJUSTE" ? cantidad : actual.stock + delta;
       if (stockNuevo < 0) fallo("La salida supera las existencias actuales.");
       if (stockNuevo > 100000) fallo("El stock máximo es 100000 unidades.");
@@ -482,6 +576,15 @@ export class AdminService {
       });
       return updated;
     });
+
+    //notificacion de inventario actualizado
+    await this.eventos.publicarBackOffice({
+      entidad: "INVENTARIO",
+      entidadId: productoId,
+      accion: "ACTUALIZADO",
+    });
+
+    return resultado;
   }
 
   async categorias() {
@@ -493,14 +596,26 @@ export class AdminService {
 
   async crearCategoria(nombre: string) {
     const limpio = nombre.trim();
-    if (limpio.length < 2 || limpio.length > 80) fallo("El nombre debe tener de 2 a 80 caracteres.");
+    if (limpio.length < 2 || limpio.length > 80)
+      fallo("El nombre debe tener de 2 a 80 caracteres.");
     try {
-      return await this.db.categoria.create({
+      const categoria= await this.db.categoria.create({
         data: { nombre: limpio },
         include: { _count: { select: { productos: true } } },
       });
+        //notificacion de categoria creada
+      await this.eventos.publicarBackOffice({
+        entidad: "CATEGORIA",
+        entidadId: categoria.id,
+        accion: "CREADO",
+    });
+
+    return categoria;
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
         fallo("Ya existe una categoría con ese nombre.");
       }
       throw error;
@@ -514,16 +629,30 @@ export class AdminService {
       fallo("El nombre debe tener de 2 a 80 caracteres.");
     }
     try {
-      return await this.db.categoria.update({
+      const categoria= await this.db.categoria.update({
         where: { id },
         data: { nombre: limpio },
         include: { _count: { select: { productos: true } } },
       });
+      //notificacion de categoria actualizada
+      await this.eventos.publicarBackOffice({
+        entidad: "CATEGORIA",
+        entidadId: categoria.id,
+        accion: "ACTUALIZADO",
+    });
+
+    return categoria;
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
         fallo("Ya existe una categoría con ese nombre.");
       }
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2025"
+      ) {
         fallo("La categoría no existe.");
       }
       throw error;
@@ -531,13 +660,25 @@ export class AdminService {
   }
 
   async eliminarCategoria(id: number) {
-    const productos = await this.db.producto.count({ where: { categoriaId: id } });
-    if (productos) fallo("No se puede eliminar una categoría que contiene productos.");
+    const productos = await this.db.producto.count({
+      where: { categoriaId: id },
+    });
+    if (productos)
+      fallo("No se puede eliminar una categoría que contiene productos.");
     try {
       await this.db.categoria.delete({ where: { id } });
+      //notificacion de categoria creada
+      await this.eventos.publicarBackOffice({
+        entidad: "CATEGORIA",
+        entidadId: id,
+        accion: "ELIMINADO",
+    });
       return true;
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2025"
+      ) {
         fallo("La categoría no existe.");
       }
       throw error;

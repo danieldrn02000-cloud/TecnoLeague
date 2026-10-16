@@ -1,6 +1,6 @@
 //Este archivo concentra la publicacion y escucha de evento en un unico proveedor de NestJS.
 //Los demás servicios utilizarán los métodos de esta clase, sin manipular directamente pubSub
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { PubSub } from "graphql-subscriptions";
 
@@ -39,11 +39,13 @@ const CANAL_BACKOFFICE = "BACKOFFICE_ACTUALIZADO";
 
 @Injectable()
 export class EventosService {
+  private readonly logger = new Logger(EventosService.name);
+
   private readonly pubSub = new PubSub<{
     BACKOFFICE_ACTUALIZADO: PayloadBackOffice;
   }>();
 
-  async publicarBackOffice(
+ async publicarBackOffice(
     datos: NuevoEventoBackOffice,
   ): Promise<void> {
     const evento: EventoBackOffice = {
@@ -52,9 +54,12 @@ export class EventosService {
       ocurridoEn: new Date().toISOString(),
     };
 
-    await this.pubSub.publish(CANAL_BACKOFFICE, {
-      backOfficeActualizado: evento,
-    });
+    try {
+      await this.pubSub.publish(CANAL_BACKOFFICE, { backOfficeActualizado: evento });
+    } catch {
+      this.logger.error("No se pudo publicar el evento de BackOffice.");
+      //aseguramos que si la notificacion falla no parezca que falló la compra
+    }
   }
 
   escucharBackOffice(): AsyncIterableIterator<PayloadBackOffice> {
