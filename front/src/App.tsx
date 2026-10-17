@@ -46,6 +46,7 @@ export default function App({
   );
   const main = useRef<HTMLElement>(null);
   useEffect(() => {
+    if (pantalla.tipo === "admin") return;
     const recargar = () => {
       if (!document.hidden) retry();
     };
@@ -57,7 +58,7 @@ export default function App({
       window.removeEventListener("focus", recargar);
       document.removeEventListener("visibilitychange", recargar);
     };
-  }, [retry]);
+  }, [pantalla.tipo, retry]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {

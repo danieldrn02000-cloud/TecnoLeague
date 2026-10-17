@@ -15,6 +15,7 @@ import { RolesGuard } from "./roles.guard";
 import { Roles } from "./roles.decorator";
 import { AdminService } from "./admin.service";
 import { PrismaService } from "./prisma.service";
+import { AuthService } from "./auth.service";
 import type { RequestContext } from "./types";
 
 function actorId(ctx: RequestContext) {
@@ -33,7 +34,14 @@ export class AdminResolver {
   constructor(
     private readonly admin: AdminService,
     private readonly db: PrismaService,
+    private readonly auth: AuthService,
   ) {}
+
+  //agrega la mutacion crearTicketBackOffice, protegia por los permisos adminisitrativos existentes
+  @Mutation("crearTicketBackOffice")
+  crearTicketBackOffice(@Context() ctx: RequestContext) {
+    return this.auth.crearTicketBackOffice(actorId(ctx));
+  }
 
   @Query("adminDashboard")
   dashboard(@Args("desde") desde: string, @Args("hasta") hasta: string) {

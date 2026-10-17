@@ -19,6 +19,7 @@ import {
 } from "./admin.resolver";
 import { AdminService } from "./admin.service";
 import { BackOfficeSubscriptionsResolver } from "./backoffice-subscription.resolver";
+import { BackOfficeSubscriptionGuard } from "./backoffice-subscription.guard";
 import { SubscriptionsResolver } from "./subscription.resolver";
 import { EventosService } from "./eventos.service";
 import type { RequestContext } from "./types";
@@ -62,6 +63,7 @@ import {
         const authorization = connectionParams?.authorization;
 
         return {
+          subscriptionTicket: connectionParams?.ticket,  // 
           req: {
             headers: {
               authorization:
@@ -106,6 +108,7 @@ import {
     SubscriptionsResolver,
     EventosService,
     BackOfficeSubscriptionsResolver,
+    BackOfficeSubscriptionGuard,
   ],
   controllers: [PagosController],
 })

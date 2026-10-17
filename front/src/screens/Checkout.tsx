@@ -69,7 +69,15 @@ export function Checkout({
     const payload = {
       nombre: String(form.get("nombre")).trim(),
       email: String(form.get("email")).trim(),
-      direccion: String(form.get("direccion")).trim(),
+      direccion: [
+        `${String(form.get("calle")).trim()} ${String(form.get("numeroExterior")).trim()}`,
+        String(form.get("colonia")).trim(),
+        String(form.get("ciudad")).trim(),
+        `C.P. ${String(form.get("codigoPostal")).trim()}`,
+        form.get("numeroInterior")
+          ? `Int. ${String(form.get("numeroInterior")).trim()}`
+          : "",
+      ].filter(Boolean).join(", "),
       renglones: lineas.map((l) => ({
         productoId: l.producto.id,
         cantidad: l.cantidad,
@@ -170,15 +178,78 @@ export function Checkout({
               />
             </label>
             <label>
-              Dirección de entrega
-              <textarea
-                name="direccion"
-                autoComplete="street-address"
+              Calle
+              <input
+                name="calle"
+                autoComplete="address-line1"
                 required
-                minLength={10}
-                maxLength={500}
-                rows={3}
-                placeholder="Calle, número, colonia, ciudad y código postal"
+                maxLength={200}
+                placeholder="Ej. Av. Insurgentes"
+              />
+            </label>
+            <label>
+              Número exterior
+              <input
+                name="numeroExterior"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]+"
+                autoComplete="address-line2"
+                required
+                maxLength={10}
+                onInput={(event) => {
+                  event.currentTarget.value = event.currentTarget.value.replace(/\D/g, "");
+                }}
+                placeholder="Ej. 123"
+              />
+            </label>
+            <label>
+              Colonia
+              <input
+                name="colonia"
+                autoComplete="address-level3"
+                required
+                maxLength={120}
+                placeholder="Ej. Centro"
+              />
+            </label>
+            <label>
+              Ciudad
+              <input
+                name="ciudad"
+                autoComplete="address-level2"
+                required
+                maxLength={120}
+                placeholder="Ej. Ciudad de México"
+              />
+            </label>
+            <label>
+              Código postal
+              <input
+                name="codigoPostal"
+                autoComplete="postal-code"
+                inputMode="numeric"
+                required
+                minLength={5}
+                maxLength={5}
+                pattern="[0-9]{5}"
+                title="Ingresa un código postal de 5 dígitos."
+                placeholder="Ej. 06000"
+              />
+            </label>
+            <label>
+              Número interior (opcional)
+              <input
+                name="numeroInterior"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                autoComplete="address-line3"
+                maxLength={10}
+                onInput={(event) => {
+                  event.currentTarget.value = event.currentTarget.value.replace(/\D/g, "");
+                }}
+                placeholder="Ej. 4"
               />
             </label>
           </fieldset>

@@ -56,6 +56,10 @@ type Sesion {
   token: String!
   usuario: Usuario!
 }
+type TicketBackOffice {
+  ticket: String!
+  expiraEn: String!
+}
 """Compra persistida con sus renglones y precios históricos."""
 type Pedido {
   """Identificador del pedido."""
@@ -281,6 +285,8 @@ type Mutation {
   solicitarRecuperacion(email: String!): Boolean!
   """Cambia la contraseña con un token de recuperación válido."""
   restablecerPassword(token: String!, password: String!): Boolean!
+  """Emite un ticket breve, exclusivo de la suscripción administrativa."""
+  crearTicketBackOffice: TicketBackOffice!
   """Crea un artículo; requiere sesión con rol ADMIN."""
   crearProducto(datos: ProductoInput!): Producto!
   """Actualiza un artículo; requiere sesión con rol ADMIN."""

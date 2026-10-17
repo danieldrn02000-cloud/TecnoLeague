@@ -14,6 +14,10 @@ import {
   Users,
 } from "lucide-react";
 import { dinero, graphql, PRODUCTO, useQuery } from "../api";
+import {
+  useBackOfficeEvents,
+  useBackOfficeRefresh,
+} from "../hooks/useBackOfficeEvents";
 import { Cargando, ErrorCarga, Imagen, Modal } from "../components/ui";
 import type { Categoria, PaginaProductos, Producto } from "../types";
 const CONSULTA = `query Inventario{productos(limite:100){total items{${PRODUCTO}}} categorias{id nombre}}`;
@@ -67,6 +71,7 @@ export function Admin({ avisar }: { avisar: (s: string) => void }) {
 
 function PanelAdmin({ avisar }: { avisar: (s: string) => void }) {
   const [seccion, setSeccion] = useState<SeccionAdmin>("dashboard");
+  const estadoConexion = useBackOfficeEvents(avisar);
   const { data } = useQuery<{
     usuarioActual: { nombre: string; email: string };
   }>("query AdminIdentidad{usuarioActual{nombre email}}");
@@ -108,6 +113,18 @@ function PanelAdmin({ avisar }: { avisar: (s: string) => void }) {
             {data?.usuarioActual.nombre
               ? `Hola, ${data.usuarioActual.nombre}`
               : ""}
+          </span>
+          <span className="muted" role="status" aria-live="polite">
+            Actualizaciones en vivo:{" "}
+            {estadoConexion === "connecting"
+              ? "Conectando"
+              : estadoConexion === "connected"
+                ? "Conectado"
+                : estadoConexion === "reconnecting"
+                  ? "Reconectando"
+                  : estadoConexion === "denied"
+                    ? "Acceso denegado"
+                    : "Desconectado / Error"}
           </span>
         </header>
         {seccion === "dashboard" && (
@@ -176,17 +193,12 @@ function DashboardAdmin({
       }[];
     };
   }>(consulta, { desde, hasta });
-  useEffect(() => {
-    const actualizarSiVisible = () => {
-      if (document.visibilityState === "visible") retry();
-    };
-    const intervalo = window.setInterval(actualizarSiVisible, 15_000);
-    window.addEventListener("focus", actualizarSiVisible);
-    return () => {
-      window.clearInterval(intervalo);
-      window.removeEventListener("focus", actualizarSiVisible);
-    };
-  }, [retry]);
+  useBackOfficeRefresh(retry, [
+    "PEDIDO",
+    "PRODUCTO",
+    "INVENTARIO",
+    "PAGO",
+  ]);
   const dashboard = data?.adminDashboard;
   const maxVenta = Math.max(
     ...(dashboard?.ventasPorDia.map((dia) => dia.total) || [0]),
@@ -199,7 +211,7 @@ function DashboardAdmin({
           <span className="muted">
             {loading
               ? "Actualizando datos…"
-              : "Actualización automática cada 15 segundos."}
+              : "Datos actualizados al recibir cambios en vivo."}
           </span>
           <button
             className="btn btn-secondary"
@@ -440,6 +452,7 @@ function PedidosAdmin({ avisar }: { avisar: (s: string) => void }) {
     fechaHasta: fechaHasta || null,
     desde,
   });
+  useBackOfficeRefresh(retry, ["PEDIDO", "PAGO"]);
   async function actualizar(id: number, status: string) {
     if (
       status === "CANCELADO" &&
@@ -713,6 +726,7 @@ function DetallePedidoAdmin({
       }[];
     };
   }>(consulta, { id });
+  useBackOfficeRefresh(retry, ["PEDIDO", "PAGO"]);
   const historial = useQuery<{
     historialPedido: {
       id: number;
@@ -726,6 +740,7 @@ function DetallePedidoAdmin({
     "query($id:Int!){historialPedido(id:$id){id desde hacia motivo creadoEn actor{id nombre}}}",
     { id },
   );
+  useBackOfficeRefresh(historial.retry, ["PEDIDO"]);
   const pedido = data?.adminPedido;
   return (
     <Modal
@@ -842,6 +857,7 @@ function ExistenciasAdmin({ avisar }: { avisar: (s: string) => void }) {
       }[];
     };
   }>(consulta);
+  useBackOfficeRefresh(retry, ["INVENTARIO", "PRODUCTO", "CATEGORIA"]);
   const productos =
     data?.productos.items.filter(
       (p) =>
@@ -1092,6 +1108,7 @@ function ClientesAdmin() {
     "query($buscar:String!,$desde:Int!){adminClientes(buscar:$buscar,desde:$desde,limite:20){total items{id nombre email totalPedidos gastoConfirmado ultimaCompra}}}",
     { buscar, desde },
   );
+  useBackOfficeRefresh(retry, ["PEDIDO", "PAGO"]);
   return (
     <>
       <div className="admin-tools">
@@ -1189,6 +1206,7 @@ function DetalleCliente({ id, cerrar }: { id: number; cerrar: () => void }) {
     "query($id:Int!){adminCliente(id:$id){nombre email pedidos{id folio fecha total status direccion metodoPago}}}",
     { id },
   );
+  useBackOfficeRefresh(retry, ["PEDIDO", "PAGO"]);
   return (
     <Modal
       titulo={data?.adminCliente.nombre || "Historial de cliente"}
@@ -1262,6 +1280,7 @@ function PagosAdmin() {
     "query($buscar:String!,$estado:EstadoPago,$desde:Int!){adminPagos(buscar:$buscar,estado:$estado,desde:$desde,limite:20){total items{id proveedor estado monto moneda idOrdenExterna idPagoExterno estadoProveedor intentoId estadoIntento ultimoError creadoEn aprobadoEn pedido{id fecha nombre email status}}}}",
     { buscar, estado: estado || null, desde },
   );
+  useBackOfficeRefresh(retry, ["PAGO"]);
   return (
     <>
       <div className="admin-tools">
@@ -1365,6 +1384,7 @@ function CategoriasAdmin({ avisar }: { avisar: (s: string) => void }) {
   const { data, loading, error, retry } = useQuery<{
     adminCategorias: { id: number; nombre: string; productosCount: number }[];
   }>("query{adminCategorias{id nombre productosCount}}");
+  useBackOfficeRefresh(retry, ["CATEGORIA", "PRODUCTO"]);
   async function crear(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
@@ -1496,10 +1516,56 @@ function Inventario({ avisar }: { avisar: (s: string) => void }) {
     categorias: Categoria[];
   }>(CONSULTA);
   const [editor, setEditor] = useState<Producto | "nuevo" | null>(null);
+  const [editorVersion, setEditorVersion] = useState(0);
+  const [registroCambio, setRegistroCambio] = useState(false);
   const [mutationError, setMutationError] = useState("");
   const [borrando, setBorrando] = useState<number | null>(null);
   const [pagina, setPagina] = useState(0);
   const [filtrar, setFiltrar] = useState("");
+  useBackOfficeRefresh(
+    retry,
+    ["PRODUCTO", "INVENTARIO", "CATEGORIA"],
+    (eventos) => {
+      if (!editor) return;
+      const relacionado =
+        editor === "nuevo"
+          ? eventos.some((evento) => evento.entidad === "CATEGORIA")
+          : eventos.some(
+              (evento) =>
+                ((evento.entidad === "PRODUCTO" ||
+                  evento.entidad === "INVENTARIO") &&
+                  evento.entidadId === editor.id) ||
+                (evento.entidad === "CATEGORIA" &&
+                  evento.entidadId === editor.categoria.id),
+            );
+      if (relacionado) setRegistroCambio(true);
+    },
+  );
+
+  async function recargarEditor() {
+    if (!editor || editor === "nuevo") return;
+    try {
+      const actualizado = await graphql<{
+        productos: PaginaProductos;
+      }>(`query { productos(limite:100) { total items { ${PRODUCTO} } } }`);
+      const producto = actualizado.productos.items.find(
+        (item) => item.id === editor.id,
+      );
+      if (!producto) {
+        setEditor(null);
+        setRegistroCambio(false);
+        avisar("El producto ya no está disponible y se cerró su formulario.");
+        return;
+      }
+      setEditor(producto);
+      setEditorVersion((version) => version + 1);
+      setRegistroCambio(false);
+      avisar("Se cargaron los datos actuales del producto.");
+    } catch (e) {
+      avisar(`No se pudo recargar el producto: ${(e as Error).message}`);
+    }
+  }
+
   async function eliminar(p: Producto) {
     if (
       !confirm(
@@ -1535,7 +1601,13 @@ function Inventario({ avisar }: { avisar: (s: string) => void }) {
           <p>Administra los productos que aparecen en el catálogo.</p>
         </div>
         <div className="flex gap-3">
-          <button className="btn" onClick={() => setEditor("nuevo")}>
+          <button
+            className="btn"
+            onClick={() => {
+              setRegistroCambio(false);
+              setEditor("nuevo");
+            }}
+          >
             <Plus size={18} /> Nuevo producto
           </button>
         </div>
@@ -1624,7 +1696,10 @@ function Inventario({ avisar }: { avisar: (s: string) => void }) {
                       <div className="flex gap-2">
                         <button
                           className="icon-btn"
-                          onClick={() => setEditor(p)}
+                          onClick={() => {
+                            setRegistroCambio(false);
+                            setEditor(p);
+                          }}
                           aria-label={`Editar ${p.nombre}`}
                         >
                           <Pencil size={17} />
@@ -1672,9 +1747,11 @@ function Inventario({ avisar }: { avisar: (s: string) => void }) {
       )}
       {editor && data && (
         <Editor
-          key={typeof editor === "string" ? editor : editor.id}
+          key={`${typeof editor === "string" ? editor : editor.id}:${editorVersion}`}
           producto={editor === "nuevo" ? undefined : editor}
           categorias={data.categorias}
+          registroCambio={registroCambio}
+          recargar={() => void recargarEditor()}
           cerrar={() => setEditor(null)}
           guardado={() => {
             setEditor(null);
@@ -1689,11 +1766,15 @@ function Inventario({ avisar }: { avisar: (s: string) => void }) {
 function Editor({
   producto: p,
   categorias,
+  registroCambio,
+  recargar,
   cerrar,
   guardado,
 }: {
   producto?: Producto;
   categorias: Categoria[];
+  registroCambio: boolean;
+  recargar: () => void;
   cerrar: () => void;
   guardado: () => void;
 }) {
@@ -1737,6 +1818,20 @@ function Editor({
         if (!busy) cerrar();
       }}
     >
+      {registroCambio && (
+        <div className="form-error" role="status">
+          Este registro cambió en otra sesión. Tus datos del formulario se
+          conservaron.
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={busy}
+            onClick={recargar}
+          >
+            Recargar datos actuales
+          </button>
+        </div>
+      )}
       <form onSubmit={guardar}>
         <fieldset disabled={busy}>
           <div className="form-grid">

@@ -36,5 +36,6 @@ export interface UsuarioAutenticado {
 
 export interface RequestContext {
   usuario?: UsuarioAutenticado;
+  subscriptionTicket?: unknown; 
   req: { headers: Record<string, string | string[] | undefined> };
 }

@@ -3,10 +3,12 @@ import { JwtService } from "@nestjs/jwt";
 import { Prisma, Usuario } from "@prisma/client";
 import { GraphQLError } from "graphql";
 import {
+  createHmac,
   createHash,
   randomBytes,
   scrypt as scryptCallback,
   timingSafeEqual,
+  randomUUID,
 } from "node:crypto";
 import { PrismaService } from "./prisma.service";
 import { CredencialesInput, RegistroInput, RequestContext } from "./types";
@@ -24,6 +26,21 @@ const derivarClave = (password: string, salt: string) =>
   });
 
 type UsuarioPublico = Pick<Usuario, "id" | "nombre" | "email" | "rol">;
+
+const BACKOFFICE_TICKET_TTL_SECONDS = 60;
+const BACKOFFICE_TICKET_ISSUER = "tecnoleague-backend";
+const BACKOFFICE_TICKET_AUDIENCE = "tecnoleague-backoffice-subscription";
+const BACKOFFICE_TICKET_PURPOSE = "backoffice-subscription";
+
+type BackOfficeTicketClaims = {
+  sub: number;
+  jti: string;
+  iss: string;
+  aud: string;
+  purpose: string;
+  iat: number;
+  exp: number;
+};
 
 function fallo(message: string, code: string): never {
   throw new GraphQLError(message, { extensions: { code } });
@@ -215,6 +232,99 @@ export class AuthService {
     });
     if (!usuario) fallo("La sesión ya no es válida.", "UNAUTHENTICATED");
     return usuario;
+  }
+
+  //genera y valida tickets de 60 segundos , con firma derivada y propósito exclusivo de backOffice
+  crearTicketBackOffice(usuarioId: number) {
+    const ahora = Math.floor(Date.now() / 1000);
+    const claims: BackOfficeTicketClaims = {
+      sub: usuarioId,
+      jti: randomUUID(),
+      iss: BACKOFFICE_TICKET_ISSUER,
+      aud: BACKOFFICE_TICKET_AUDIENCE,
+      purpose: BACKOFFICE_TICKET_PURPOSE,
+      iat: ahora,
+      exp: ahora + BACKOFFICE_TICKET_TTL_SECONDS,
+    };
+    const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+    const contenido = `bo1.${payload}`;
+    const ticket = `${contenido}.${this.firmarTicketBackOffice(contenido)}`;
+
+    return {
+      ticket,
+      expiraEn: new Date(claims.exp * 1000).toISOString(),
+    };
+  }
+
+  async usuarioBackOfficePorTicket(ticket: string): Promise<UsuarioPublico> {
+    const claims = this.verificarTicketBackOffice(ticket);
+    const usuario = await this.db.usuario.findUnique({
+      where: { id: claims.sub },
+      select: { id: true, nombre: true, email: true, rol: true },
+    });
+    if (!usuario) fallo("La sesión ya no es válida.", "UNAUTHENTICATED");
+    if (usuario.rol !== "ADMIN") {
+      fallo("No tienes permiso para realizar esta operación.", "FORBIDDEN");
+    }
+    return usuario;
+  }
+
+  private verificarTicketBackOffice(ticket: string): BackOfficeTicketClaims {
+    const partes = ticket.split(".");
+    if (partes.length !== 3 || partes[0] !== "bo1") {
+      fallo("El ticket de administración no es válido.", "UNAUTHENTICATED");
+    }
+
+    const contenido = `${partes[0]}.${partes[1]}`;
+    const firmaEsperada = Buffer.from(this.firmarTicketBackOffice(contenido));
+    const firmaRecibida = Buffer.from(partes[2]);
+    if (
+      firmaEsperada.length !== firmaRecibida.length ||
+      !timingSafeEqual(firmaEsperada, firmaRecibida)
+    ) {
+      fallo("El ticket de administración no es válido.", "UNAUTHENTICATED");
+    }
+
+    let claims: Partial<BackOfficeTicketClaims>;
+    try {
+      claims = JSON.parse(
+        Buffer.from(partes[1], "base64url").toString("utf8"),
+      ) as Partial<BackOfficeTicketClaims>;
+    } catch {
+      fallo("El ticket de administración no es válido.", "UNAUTHENTICATED");
+    }
+
+    const ahora = Math.floor(Date.now() / 1000);
+    if (
+      !Number.isInteger(claims.sub) ||
+      (claims.sub ?? 0) < 1 ||
+      typeof claims.jti !== "string" ||
+      !/^[0-9a-f-]{36}$/i.test(claims.jti) ||
+      claims.iss !== BACKOFFICE_TICKET_ISSUER ||
+      claims.aud !== BACKOFFICE_TICKET_AUDIENCE ||
+      claims.purpose !== BACKOFFICE_TICKET_PURPOSE ||
+      !Number.isInteger(claims.iat) ||
+      !Number.isInteger(claims.exp) ||
+      (claims.iat ?? 0) > ahora ||
+      (claims.exp ?? 0) <= ahora ||
+      (claims.exp ?? 0) - (claims.iat ?? 0) !==
+        BACKOFFICE_TICKET_TTL_SECONDS
+    ) {
+      fallo("El ticket de administración expiró o no es válido.", "UNAUTHENTICATED");
+    }
+
+    return claims as BackOfficeTicketClaims;
+  }
+
+  private firmarTicketBackOffice(contenido: string) {
+    const secreto = process.env.JWT_SECRET;
+    if (!secreto) throw new Error("Falta JWT_SECRET en el backend.");
+    const clave = createHmac("sha256", secreto)
+      .update("tecnoleague:backoffice-subscription-ticket:v1")
+      .digest();
+    return createHmac("sha256", clave)
+      .update(contenido)
+      .digest("base64url");
   }
 
   private publico(usuario: Usuario): UsuarioPublico {
