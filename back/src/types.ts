@@ -27,6 +27,18 @@ export interface CredencialesInput {
   email: string;
   password: string;
 }
+
+export interface DatosPagoInput{
+  claveOperacion: string;
+  token: string;
+  metodoPagoId: string;
+  tipoMetodoPago: "credit_card" | "debit_card";
+  cuotas: number;
+  email:string;
+  identificacion?:{tipo: string;
+    numero:string
+  } | null;
+}
 export interface UsuarioAutenticado {
   id: number;
   nombre: string;

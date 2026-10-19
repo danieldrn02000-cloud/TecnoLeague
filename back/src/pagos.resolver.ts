@@ -1,7 +1,7 @@
 import { Args, Context, Mutation, Query, Resolver } from "@nestjs/graphql";
 import { AuthService } from "./auth.service";
 import { PagosService } from "./pagos.service";
-import type { PedidoInput, RequestContext } from "./types";
+import type { DatosPagoInput, PedidoInput, RequestContext } from "./types";
 
 @Resolver()
 export class PagosResolver {
@@ -9,7 +9,31 @@ export class PagosResolver {
     private readonly pagos: PagosService,
     private readonly auth: AuthService,
   ) {}
+  //mutatios preparar compra y procesar compra
+  @Mutation("prepararCompra")
+  async prepararCompra(
+    @Args("datos") datos: PedidoInput,
+    @Context() ctx: RequestContext,
+  ) {
+    return this.pagos.prepararCompra(
+      datos,
+      (await this.auth.usuarioActual(ctx)).id,
+    );
+  }
 
+  @Mutation("procesarPago")
+  async procesarPago(
+    @Args("intentoId") intentoId: string,
+    @Args("datosPago") datos: DatosPagoInput,
+    @Context() ctx: RequestContext,
+  ) {
+    return this.pagos.procesarPago(
+      intentoId,
+      datos,
+      (await this.auth.usuarioActual(ctx)).id,
+    );
+  }
+  
   @Mutation("iniciarPago")
   async iniciarPago(
     @Args("datos") datos: PedidoInput,

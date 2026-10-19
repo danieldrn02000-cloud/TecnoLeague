@@ -9,6 +9,7 @@ import { AuthService } from "./auth.service";
 import { TiendaService } from "./tienda.service";
 import { JwtModule } from "@nestjs/jwt";
 import { PagosController } from "./pagos.controller";
+import { MercadoPagoOrdersService } from "./mercadopago-orders.service";
 import {
   AdminResolver,
   CategoriaAdminResolver,
@@ -109,6 +110,7 @@ import {
     EventosService,
     BackOfficeSubscriptionsResolver,
     BackOfficeSubscriptionGuard,
+    MercadoPagoOrdersService,
   ],
   controllers: [PagosController],
 })

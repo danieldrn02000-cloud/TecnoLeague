@@ -202,6 +202,20 @@ enum EstadoIntento {
   CANCELADO
   EXPIRADO
 }
+
+//Estados validados
+enum ModalidadCheckout{
+  REDIRECCION
+  ORDERS_API
+}
+
+enum EstadoOperacionCobro{
+  ENVIADA
+  INCIERTA
+  VINCULADA
+  FINALIZADA
+}
+
 model IntentoCompra {
   id String @id @default(uuid())
   usuarioId Int @map("usuario_id")
@@ -214,6 +228,8 @@ model IntentoCompra {
   total Decimal @db.Decimal(12, 2)
   moneda String @default("MXN")
   estado EstadoIntento @default(INICIADO)
+  modalidad ModalidadCheckout @default(REDIRECCION)
+  operaciones OperacionCobro[]
   pedidoId Int? @unique @map("pedido_id")
   pedido Pedido? @relation(fields: [pedidoId], references: [id], onDelete: Restrict)
   pago Pago?
@@ -230,6 +246,7 @@ model IntentoCompra {
   @@index([usuarioId, creadoEn])
   @@map("intentos_compra")
 }
+
 model DetalleIntento {
   id Int @id @default(autoincrement())
   intentoId String @map("intento_id")
@@ -241,4 +258,21 @@ model DetalleIntento {
   nombreProducto String @map("nombre_producto")
   @@unique([intentoId, productoId])
   @@map("detalle_intento")
+}
+
+//Distinguir cada cobro, recuperar respuestas inciertas y conservar los intentos anteriores
+// Nunca guardar tokens de tarjeta ni cuerpos de solicitudes o respuestas MP.
+model OperacionCobro {
+  id String @id @default(uuid())
+  intentoId String @map("intento_id")
+  intento IntentoCompra @relation(fields: [intentoId], references: [id], onDelete: Restrict)
+  claveSolicitud String @unique @map("clave_solicitud")
+  claveIdempotencia String @unique @map("clave_idempotencia")
+  idOrdenExterna String? @unique @map("id_orden_externa")
+  estado EstadoOperacionCobro @default(ENVIADA)
+  estadoProveedor String? @map("estado_proveedor")
+  creadoEn DateTime @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+  @@index([intentoId, creadoEn])
+  @@map("operaciones_cobro")
 }

@@ -2638,3 +2638,49 @@ tr:last-child td {
 .auth-options{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
 .auth-check{display:flex;flex-direction:row;align-items:center;gap:8px;font-size:.9rem;cursor:pointer}
 .auth-check input{width:auto}
+
+.tarjeta-panel {
+  margin-top: 24px;
+  padding: 24px;
+}
+
+.tarjeta-form {
+  display: grid;
+  gap: 16px;
+  max-width: 560px;
+}
+
+.tarjeta-form label,
+.tarjeta-form span {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.tarjeta-form input,
+.tarjeta-form select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+}
+
+.mp-campo-seguro {
+  box-sizing: border-box;
+  height: 44px;
+  padding: 10px;
+  border: 1px solid #888;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.tarjeta-fila {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 480px) {
+  .tarjeta-fila {
+    grid-template-columns: 1fr;
+  }
+}

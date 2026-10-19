@@ -7,10 +7,11 @@ import {
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { EstadoIntento, Prisma } from "@prisma/client";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { PrismaService } from "./prisma.service";
 import { fallo } from "./tienda.service";
-import type { PedidoInput } from "./types";
+import type {DatosPagoInput, PedidoInput} from "./types"
+import { MercadoPagoOrdersService, type OrdenMP } from "./mercadopago-orders.service";
 
 type RecursoMP = {
   id?: string | number;
@@ -18,6 +19,7 @@ type RecursoMP = {
   status?: string;
   status_detail?: string;
   currency?: string;
+  country_code?:string;
   total_amount?: string;
   total_paid_amount?: string;
   external_reference?: string;
@@ -26,6 +28,7 @@ type RecursoMP = {
   order?: { id?: string | number };
   last_updated_date?: string;
 };
+
 const incluirIntento = { detalles: true, pago: true } as const;
 type Intento = Prisma.IntentoCompraGetPayload<{
   include: typeof incluirIntento;
@@ -41,6 +44,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly db: PrismaService,
     private readonly eventos: EventosService,
+    private readonly orders: MercadoPagoOrdersService,
   ) {}
 
   // Acumula avisos durante la transacción y publica solamente si el commit termina.
@@ -110,12 +114,14 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     return url.href.replace(/\/$/, "");
   }
 
-  async iniciarPago(datos: PedidoInput, usuarioId: number) {
-    this.configuracion();
-    const retornoBase = this.urlConfigurada("MP_RETURN_BASE_URL");
-    const callback = this.urlConfigurada("MP_WEBHOOK_URL");
-    if (!process.env.MP_WEBHOOK_SECRET)
-      fallo("Configura MP_WEBHOOK_SECRET en el backend.");
+  private async reservarCompra(
+    datos: PedidoInput,
+    usuarioId: number,
+    modalidad: "REDIRECCION" | "ORDERS_API",
+  ){
+    const retornoBase = modalidad ==="REDIRECCION" ? this.urlConfigurada("MP_RETURN_BASE_URL"):null;
+    const callback= modalidad === "REDIRECCION" ? this.urlConfigurada("MP_WEBHOOK_URL"):null;
+
     if (
       datos.nombre.trim().length < 2 ||
       datos.nombre.length > 120 ||
@@ -168,7 +174,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         if (previo) {
           if (
             previo.usuarioId !== usuarioId ||
-            previo.huellaSolicitud !== huella
+            previo.huellaSolicitud !== huella ||
+            previo.modalidad !== modalidad
           )
             fallo("La solicitud ya se utilizó con otros datos.");
           return previo;
@@ -205,7 +212,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         }
         if (!total.gt(0)) fallo("El importe debe ser positivo.");
         const retorno = `${retornoBase}/pago/retorno?intento=${id}`;
-        const payload = {
+        const payload =modalidad ==="REDIRECCION"? {
           type: "online",
           processing_mode: "manual",
           currency: "MXN",
@@ -227,11 +234,13 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
               retries: { allowed: false },
             },
           },
-        };
+        }:undefined;
+
         const nuevo = await tx.intentoCompra.create({
           data: {
             id,
             usuarioId,
+            modalidad,
             ...contacto,
             claveSolicitud: datos.claveSolicitud,
             huellaSolicitud: huella,
@@ -275,6 +284,19 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
       },
       { maxWait: 10000, timeout: 15000 },
     );
+    return intento;
+  }
+
+  
+  async prepararCompra(datos: PedidoInput, usuarioId: number) {
+    const intento = await this.reservarCompra(datos, usuarioId, "ORDERS_API");
+    return this.consultarIntento(intento.id, usuarioId);
+  }
+
+  async iniciarPago(datos: PedidoInput, usuarioId: number) {
+    this.configuracion();
+    if (!process.env.MP_WEBHOOK_SECRET) fallo("Configura MP_WEBHOOK_SECRET en el backend.");
+    const intento = await this.reservarCompra(datos, usuarioId, "REDIRECCION");
     if (!pendientes.includes(intento.estado))
       fallo(
         "Este intento ya terminó. Consulta su resultado antes de volver a comprar.",
@@ -301,8 +323,10 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     if (
       !orden.id ||
       String(orden.user_id) !== collector ||
-      orden.currency !== intento.moneda ||
-      orden.external_reference !== `TL-INTENTO-${intento.id}` ||
+      !(orden.currency === intento.moneda ||
+        (intento.modalidad === "ORDERS_API" && !orden.currency && orden.country_code === "MEX" && intento.moneda === "MXN")) ||
+      orden.external_reference !== (intento.modalidad === "ORDERS_API"
+        ? `TL-OP-${intento.operaciones[0]?.id}` : `TL-INTENTO-${intento.id}`) ||
       !this.importeValido(orden.total_amount, intento.total) ||
       (intento.pago?.idOrdenExterna &&
         String(orden.id) !== intento.pago.idOrdenExterna)
@@ -323,6 +347,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
           where: { id },
           include: incluirIntento,
         });
+        //Las consultas del nuevo flujo nunca crean ni reenvian cobros
+        if(intento.modalidad==="ORDERS_API") return;
         if (
           intento.pago?.idOrdenExterna ||
           !pendientes.includes(intento.estado)
@@ -427,10 +453,14 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     }
     const actual = await this.db.intentoCompra.findUniqueOrThrow({
       where: { id },
-      include: { detalles: true },
+      include: { detalles: true, operaciones:true },
     });
     return {
       intentoId: id,
+      total:actual.total.toFixed(2),
+      moneda: actual.moneda,
+      operacionId: actual.operaciones[0]?.id ?? null,
+      esadoOperacion: actual.operaciones[0]?.estado ?? null,
       estado: actual.estado,
       pedidoId: actual.pedidoId,
       expiraEn: actual.expiraEn.toISOString(),
@@ -866,7 +896,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         ? error.message
         : "Error interno al verificar el pago.";
     await this.db.intentoCompra.updateMany({
-      where: { id, estado: { not: "CONFIRMADO" } },
+      where: { id, estado: { in: pendientes } },
       data: {
         estado: "EN_PROCESO",
         ultimoError: motivo,

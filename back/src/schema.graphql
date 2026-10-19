@@ -312,6 +312,10 @@ type EstadoCheckout {
   expiraEn: String!
   aviso: String
   checkoutUrl: String
+  total: String!
+  moneda: String!
+  operacionId: ID
+  estadoOperacion: String
   renglones: [RenglonIntento!]!
 }
 type InicioPago {
@@ -325,8 +329,25 @@ extend type Query {
   intentoActivo: ID
 }
 extend type Mutation {
+  prepararCompra(datos: PedidoInput!): EstadoCheckout!
+  procesarPago(intentoId: ID!, datosPago: DatosPagoInput!): EstadoCheckout!
   iniciarPago(datos: PedidoInput!): InicioPago!
   cancelarIntento(intentoId: ID!): EstadoCheckout!
+}
+
+enum TipoTarjetaMP { credit_card debit_card }
+input IdentificacionPagoInput {
+  tipo: String!
+  numero: String!
+}
+input DatosPagoInput {
+  claveOperacion: ID!
+  token: String!
+  metodoPagoId: String!
+  tipoMetodoPago: TipoTarjetaMP!
+  cuotas: Int!
+  email: String!
+  identificacion: IdentificacionPagoInput
 }
 
 type Subscription{

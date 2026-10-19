@@ -7,6 +7,8 @@ import { Resumen } from "./Carrito";
 import { Vacio } from "../components/ui";
 import { guardarIntento, leerIntento } from "../lib/checkout";
 import { verificarCheckout } from "../lib/verificar-checkout";
+import { FormularioTarjeta } from "../components/tarjeta";
+
 export function Checkout({
   currentUser,
   navegar,
@@ -16,6 +18,10 @@ export function Checkout({
   completado: (p: Pedido) => void;
 }) {
   const { lineas } = useCarrito();
+  const [tarjetaValidada, setTarjetaValidada] = useState(false);
+  //importe provisional para probar el formualrio.
+  const importeReferencia = lineas.reduce(
+    (total, linea) => total + linea.producto.precio * linea.cantidad,0).toFixed(2);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const bloqueado = useRef(false);
@@ -31,37 +37,50 @@ export function Checkout({
     setError("");
     setPendiente(leerIntento(currentUser.id));
     verificarCheckout(currentUser.id)
-      .then(resultado => {
+      .then((resultado) => {
         if (!activo) return;
         setPendiente(resultado.pendiente);
         setAviso(resultado.aviso);
       })
-      .catch(error => {
+      .catch((error) => {
         if (!activo) return;
         setFalloVerificacion(true);
-        setError(`No pudimos comprobar tus pagos. ${error instanceof Error ? error.message : "Reintenta la comprobación."}`);
+        setError(
+          `No pudimos comprobar tus pagos. ${error instanceof Error ? error.message : "Reintenta la comprobación."}`,
+        );
       })
-      .finally(() => { if (activo) setVerificando(false); });
-    return () => { activo = false; };
+      .finally(() => {
+        if (activo) setVerificando(false);
+      });
+    return () => {
+      activo = false;
+    };
   }, [currentUser.id, revision]);
   const solicitud = useRef({ contenido: "", clave: "" });
   if (!lineas.length && !pendiente && !verificando && !falloVerificacion)
     return (
       <>
-      {aviso && <p role="status">{aviso}</p>}
-      <Vacio
-        titulo="No hay productos en el carrito"
-        texto="Agrega un producto para continuar."
-        accion="Ver catálogo"
-        onClick={() => navegar({ tipo: "catalogo" })}
-      />
+        {aviso && <p role="status">{aviso}</p>}
+        <Vacio
+          titulo="No hay productos en el carrito"
+          texto="Agrega un producto para continuar."
+          accion="Ver catálogo"
+          onClick={() => navegar({ tipo: "catalogo" })}
+        />
       </>
     );
 
   async function enviar(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-      if (bloqueado.current || pendiente || verificando || falloVerificacion || !lineas.length) return;
-      bloqueado.current = true;
+    if (
+      bloqueado.current ||
+      pendiente ||
+      verificando ||
+      falloVerificacion ||
+      !lineas.length
+    )
+      return;
+    bloqueado.current = true;
     setBusy(true);
     setError("");
 
@@ -77,7 +96,9 @@ export function Checkout({
         form.get("numeroInterior")
           ? `Int. ${String(form.get("numeroInterior")).trim()}`
           : "",
-      ].filter(Boolean).join(", "),
+      ]
+        .filter(Boolean)
+        .join(", "),
       renglones: lineas.map((l) => ({
         productoId: l.producto.id,
         cantidad: l.cantidad,
@@ -85,24 +106,42 @@ export function Checkout({
     };
 
     const contenido = JSON.stringify(payload);
-      if (solicitud.current.contenido !== contenido)
-        solicitud.current = { contenido, clave: crypto.randomUUID() };
-      
+    if (solicitud.current.contenido !== contenido)
+      solicitud.current = { contenido, clave: crypto.randomUUID() };
+
     try {
       // La clave también es el ID del intento: sobrevive incluso si se pierde
       // la respuesta después de que el servidor reservó stock.
       const intentoId = solicitud.current.clave;
       guardarIntento(currentUser.id, intentoId);
-      const { iniciarPago } = await graphql<{ iniciarPago: {
-        intentoId: string; checkoutUrl: string | null; estado: string; pedidoId: number | null;
-      } }>(
-        `mutation Pagar($datos:PedidoInput!){iniciarPago(datos:$datos){intentoId checkoutUrl estado pedidoId}}`,
+      const { iniciarPago } = await graphql<{
+        iniciarPago: {
+          intentoId: string;
+          checkoutUrl: string | null;
+          estado: string;
+          pedidoId: number | null;
+        };
+      }>(
+        `
+          mutation Pagar($datos: PedidoInput!) {
+            iniciarPago(datos: $datos) {
+              intentoId
+              checkoutUrl
+              estado
+              pedidoId
+            }
+          }
+        `,
         { datos: { ...payload, claveSolicitud: intentoId } },
       );
       setPendiente(iniciarPago.intentoId);
-      window.location.assign(iniciarPago.checkoutUrl ?? `/pago/retorno?intento=${encodeURIComponent(iniciarPago.intentoId)}`);
+      window.location.assign(
+        iniciarPago.checkoutUrl ??
+          `/pago/retorno?intento=${encodeURIComponent(iniciarPago.intentoId)}`,
+      );
     } catch (e) {
-      const mensaje = e instanceof Error ? e.message : "No se pudo iniciar el pago.";
+      const mensaje =
+        e instanceof Error ? e.message : "No se pudo iniciar el pago.";
       setError(mensaje);
       // Mantener la clave ante una respuesta incierta; consultar su existencia
       // antes de permitir otra compra. Un rechazo anterior a crear el intento
@@ -116,7 +155,9 @@ export function Checkout({
       } catch (error) {
         setPendiente(leerIntento(currentUser.id));
         setFalloVerificacion(true);
-        setError(`${mensaje} No pudimos verificar el resultado: ${error instanceof Error ? error.message : "reintenta la comprobación."}`);
+        setError(
+          `${mensaje} No pudimos verificar el resultado: ${error instanceof Error ? error.message : "reintenta la comprobación."}`,
+        );
       } finally {
         setVerificando(false);
       }
@@ -198,7 +239,10 @@ export function Checkout({
                 required
                 maxLength={10}
                 onInput={(event) => {
-                  event.currentTarget.value = event.currentTarget.value.replace(/\D/g, "");
+                  event.currentTarget.value = event.currentTarget.value.replace(
+                    /\D/g,
+                    "",
+                  );
                 }}
                 placeholder="Ej. 123"
               />
@@ -247,36 +291,48 @@ export function Checkout({
                 autoComplete="address-line3"
                 maxLength={10}
                 onInput={(event) => {
-                  event.currentTarget.value = event.currentTarget.value.replace(/\D/g, "");
+                  event.currentTarget.value = event.currentTarget.value.replace(
+                    /\D/g,
+                    "",
+                  );
                 }}
                 placeholder="Ej. 4"
               />
             </label>
           </fieldset>
-          <div className="pago">
-            <Package size={23} />
-            <div>
-              <strong>Mercado Pago — pruebas</strong>
-              <p>Se abrirá Mercado Pago. Usa el comprador y las tarjetas de prueba.</p>
-            </div>
-            <Check size={18} />
-          </div>
+
+          <div className="pago"></div> 
+
+
           {aviso && <p role="status">{aviso}</p>}
-          {verificando && <p role="status">Comprobando el estado de tus pagos…</p>}
+          {verificando && (
+            <p role="status">Comprobando el estado de tus pagos…</p>
+          )}
           {pendiente && (
-            <p role="status">Conservamos la referencia de un pago. Antes de pagar otra vez,
-              <a href={`/pago/retorno?intento=${encodeURIComponent(pendiente)}`}> revisa el resultado de tu pago</a>.
+            <p role="status">
+              Conservamos la referencia de un pago. Antes de pagar otra vez,
+              <a
+                href={`/pago/retorno?intento=${encodeURIComponent(pendiente)}`}
+              >
+                {" "}
+                revisa el resultado de tu pago
+              </a>
+              .
             </p>
           )}
           {error && (
             <div className="form-error" role="alert">
               {error}
-              {falloVerificacion && <button
-                type="button"
-                className="text-btn"
-                disabled={verificando || busy}
-                onClick={() => setRevision(n => n + 1)}
-              >Reintentar comprobación</button>}
+              {falloVerificacion && (
+                <button
+                  type="button"
+                  className="text-btn"
+                  disabled={verificando || busy}
+                  onClick={() => setRevision((n) => n + 1)}
+                >
+                  Reintentar comprobación
+                </button>
+              )}
               <button
                 type="button"
                 className="text-btn"
@@ -286,22 +342,49 @@ export function Checkout({
               </button>
             </div>
           )}
-          {pendiente && !verificando && <button
-            type="button"
-            className="text-btn"
-            disabled={busy}
-            onClick={() => setRevision(n => n + 1)}
-          >Actualizar estado del pago</button>}
+          {pendiente && !verificando && (
+            <button
+              type="button"
+              className="text-btn"
+              disabled={busy}
+              onClick={() => setRevision((n) => n + 1)}
+            >
+              Actualizar estado del pago
+            </button>
+          )}
         </div>
         <Resumen>
-          <button type="submit" className="btn full" disabled={busy || verificando || falloVerificacion || !!pendiente || !lineas.length}>
-            {busy ? "Procesando solicitud…" : verificando ? "Comprobando pagos…" : "Pagar con Mercado Pago"}
-            <Check size={18} />
+          <button type="submit" className="btn full" disabled>
+            Cobro pendiente de conectar
           </button>
           <p className="muted text-sm">
             El servidor valida existencias y calcula el total al confirmar.
           </p>
         </Resumen>
+
+        {!verificando &&
+          !falloVerificacion &&
+          !pendiente &&
+          lineas.length > 0 && (
+            <>
+              <FormularioTarjeta
+                key={importeReferencia}
+                importe={importeReferencia}
+                onToken={() => {
+                  // No guardar ni imprimir el token.
+                  // En la etapa 3 se enviará directamente al backend.
+                  setTarjetaValidada(true);
+                }}
+              />
+
+              {tarjetaValidada && (
+                <p role="status">
+                  Token generado correctamente. Todavía no se ha realizado
+                  ningún cobro.
+                </p>
+              )}
+            </>
+          )}
       </form>
     </>
   );
