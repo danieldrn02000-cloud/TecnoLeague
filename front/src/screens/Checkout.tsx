@@ -39,10 +39,10 @@ export function Checkout({ currentUser, navegar }: {
       try {
         const resultado = await verificarCheckout(currentUser.id);
         if (activo) await recibir(resultado.estado);
-      } catch (e) {
+      } catch {
         if (!activo) return;
         setFalloVerificacion(true);
-        setError(e instanceof Error ? e.message : "No pudimos comprobar tus pagos.");
+        setError("No pudimos comprobar tus pagos. Inténtalo de nuevo en unos momentos.");
         const local = leerIntento(currentUser.id);
         if (local) recuperar(local);
       } finally {
@@ -96,8 +96,8 @@ export function Checkout({ currentUser, navegar }: {
         datos: { ...datos, claveSolicitud: solicitud.current.clave },
       });
       await recibir(data.prepararCompra);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No pudimos preparar tu compra.");
+    } catch {
+      setError("No pudimos preparar tu compra. Revisa tus datos y vuelve a intentarlo.");
       try {
         const resultado = await verificarCheckout(currentUser.id);
         await recibir(resultado.estado);
@@ -115,7 +115,7 @@ export function Checkout({ currentUser, navegar }: {
   async function pagar(tarjeta: TarjetaTokenizada) {
     if (bloqueado.current || !estado) return;
     if (!puedePagarIntento(estado)) {
-      setError("La reserva necesita verificarse antes de pagar.");
+      setError("Necesitamos comprobar tu compra antes de continuar con el pago.");
       recuperar(estado.intentoId);
       return;
     }
@@ -140,7 +140,7 @@ export function Checkout({ currentUser, navegar }: {
       });
       await recibir(data.procesarPago);
     } catch {
-      setError("No pudimos confirmar la respuesta del pago. Estamos consultando el mismo intento; no pagues otra vez.");
+      setError("Todavía no pudimos confirmar tu pago. Estamos revisándolo; espera antes de volver a pagar.");
       recuperar(id);
     } finally {
       // El token vive solo en esta llamada; no se guarda para cobros posteriores.
@@ -282,7 +282,7 @@ export function Checkout({ currentUser, navegar }: {
             <button type="submit" className="btn full" disabled={busy || verificando || falloVerificacion || !!seguimiento.referencia}>
               {busy ? "Preparando…" : "Continuar al pago"} <Check size={18} />
             </button>
-            <p className="muted text-sm">El servidor valida precios y disponibilidad antes del pago.</p>
+            <p className="muted text-sm">Revisa tus datos de entrega antes de continuar.</p>
           </Resumen>
         </form>
       )}
@@ -295,7 +295,7 @@ export function Checkout({ currentUser, navegar }: {
       {busy && enviado && <p role="status">Procesando el pago. Espera el resultado…</p>}
       {!estado && seguimiento.referencia && (
         <div className="panel resultado-pago">
-          <p role="status">Conservamos el intento y estamos comprobando su estado.</p>
+          <p role="status">Estamos comprobando tu pago. Tu carrito está guardado.</p>
           {seguimiento.error && <p role="alert">{seguimiento.error}</p>}
           <button type="button" className="text-btn" disabled={seguimiento.consultando} onClick={seguimiento.revisar}>Consultar estado</button>
         </div>

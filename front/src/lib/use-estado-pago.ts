@@ -122,9 +122,9 @@ export function useEstadoPago(usuarioId: number) {
         setError("");
         continuar = !intentoTerminado(nuevo);
         if (nuevo.autenticacion) control.maximo = 120;
-      } catch (e) {
+      } catch {
         if (!activo) return;
-        setError(e instanceof Error ? e.message : "No pudimos consultar el pago.");
+        setError("No pudimos consultar tu pago. Inténtalo de nuevo en unos momentos.");
       } finally {
         if (activo) setConsultando(false);
       }
@@ -161,8 +161,8 @@ export function useEstadoPago(usuarioId: number) {
     try {
       const data = await graphql<{ cancelarIntento: EstadoCheckout }>(CANCELAR_INTENTO, { id: referencia });
       await recibir(data.cancelarIntento);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo cancelar. Consulta el estado antes de pagar otra vez.");
+    } catch {
+      setError("No pudimos cancelar tu compra. Consulta el estado del pago antes de volver a pagar.");
     } finally {
       setConsultando(false);
     }

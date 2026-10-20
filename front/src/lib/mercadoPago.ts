@@ -8,7 +8,9 @@ export type TarjetaTokenizada = {
 export type CampoSeguro = {
   mount(contenedor: string): CampoSeguro;
   unmount(): void;
-  on(evento: string, callback: (datos: { bin?: string | null }) => void): void;
+  on(evento: string, callback: (datos: {
+    bin?: string | null; field?: string; errorMessages?: { cause?: string; message?: string }[];
+  }) => void): void;
   update(propiedades: { settings: { length?: number; validation?: string; mode?: string } }): void;
 };
 export type MetodoTarjeta = {
@@ -84,9 +86,7 @@ export async function obtenerMercadoPago(): Promise<InstanciaMercadoPago> {
   const publicKey = import.meta.env.PUBLIC_MP_PUBLIC_KEY?.trim();
 
   if (!publicKey) {
-    throw new Error(import.meta.env.DEV
-      ? "Falta PUBLIC_MP_PUBLIC_KEY en front/.env."
-      : "El pago con tarjeta no está disponible. Falta configurar la clave pública de Mercado Pago en la compilación del sitio.");
+    throw new Error("El pago con tarjeta no está disponible en este momento. Inténtalo de nuevo más tarde.");
   }
 
   const MercadoPago = await cargarSDK();

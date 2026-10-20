@@ -73,7 +73,7 @@ it("limita las consultas aunque se enfoque la ventana; permite otra tanda manual
     });
   }
   expect(api).toHaveBeenCalledTimes(12);
-  expect(screen.getByText(/La consulta automática se ha pausado/)).toBeTruthy();
+  expect(screen.getByText(/Tu pago sigue pendiente/)).toBeTruthy();
   await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
   expect(api).toHaveBeenCalledTimes(12);
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Consultar estado" })); });

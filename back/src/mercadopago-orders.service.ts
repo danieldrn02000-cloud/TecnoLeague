@@ -3,6 +3,7 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from "@nestjs/common";
+import { esMotivoTarjeta } from "./mensajes-pago";
 
 export type CrearOrdenInput = {
   modoCaptura?: "automatic" | "automatic_async";
@@ -58,7 +59,7 @@ export class ErrorOrdersMP extends ServiceUnavailableException {
   readonly rechazadoDefinitivo: boolean;
   constructor(
     public readonly httpProveedor: number | null,
-    public readonly diagnostico: { codigo?: string; causas?: string[]; campos?: string[]; formato?: string; requestId?: string } = {},
+    public readonly diagnostico: { codigo?: string; causas?: string[]; campos?: string[]; formato?: string; requestId?: string; motivoTarjeta?: string } = {},
   ) {
     super(
       httpProveedor === null
@@ -71,7 +72,7 @@ export class ErrorOrdersMP extends ServiceUnavailableException {
       ([400, 401, 403, 404, 405, 422].includes(httpProveedor) ||
         // Orders devuelve 402 + failed al rechazar la transacción del POST.
         // Otros 402 sin ese código se conservan como inciertos.
-        (httpProveedor === 402 && diagnostico.codigo === "failed"));
+        (httpProveedor === 402 && (diagnostico.codigo === "failed" || esMotivoTarjeta(diagnostico.codigo))));
   }
 }
 
@@ -273,6 +274,10 @@ export class MercadoPagoOrdersService {
     ]);
     const campos = new Set<string>();
     const registros: Record<string, unknown>[] = [];
+    let motivoTarjeta: string | undefined;
+    const motivo = (valor: unknown) => {
+      if (!motivoTarjeta && esMotivoTarjeta(valor)) motivoTarjeta = valor;
+    };
     const campo = (valor: unknown) => {
       if (typeof valor !== "string" || valor.length > 2048) return;
       const normalizado = valor.replace(/^\//, "").replace(/\/(\d+)(?=\/|$)/g, "[$1]").replace(/\//g, ".");
@@ -286,11 +291,12 @@ export class MercadoPagoOrdersService {
     const recoger = (valor: unknown, nivel = 0) => {
       if (nivel > 4 || registros.length >= 30) return;
       if (Array.isArray(valor)) { valor.slice(0, 10).forEach(v => recoger(v, nivel + 1)); return; }
-      if (!valor || typeof valor !== "object") { campo(valor); return; }
+      if (!valor || typeof valor !== "object") { campo(valor); motivo(valor); return; }
       const registro = valor as Record<string, unknown>;
       registros.push(registro);
+      for (const nombre of ["code", "error", "status_detail", "cause"]) motivo(registro[nombre]);
       for (const nombre of ["field", "path", "property", "parameter", "message", "description"]) campo(registro[nombre]);
-      for (const nombre of ["errors", "cause", "causes", "error", "details"]) recoger(registro[nombre], nivel + 1);
+      for (const nombre of ["errors", "cause", "causes", "error", "details", "transactions", "payments", "data"]) recoger(registro[nombre], nivel + 1);
     };
     recoger(datos);
     const causas = [...new Set(registros.slice(1).flatMap(r => {
@@ -304,6 +310,7 @@ export class MercadoPagoOrdersService {
       formato: Array.isArray(datos.errors) ? "errors" : Array.isArray(datos.cause) ? "cause"
         : Array.isArray(datos.causes) ? "causes" : cuerpo && typeof cuerpo === "object" ? "json" : "no_json",
       requestId: codigo(requestId),
+      ...(motivoTarjeta ? { motivoTarjeta } : {}),
     };
   }
 
