@@ -40,6 +40,7 @@ test("Orders HTTP: payload automático, idempotencia y respuesta sin token", asy
   assert.equal(body.currency, "MXN");
   assert.equal(body.transactions.payments[0].amount, "25.50");
   assert.equal(body.transactions.payments[0].payment_method.token, "token-tarjeta-simulado");
+  assert.equal(body.config, undefined);
   assert.equal(JSON.stringify(resultado).includes("no-devolver"), false);
 });
 
@@ -138,7 +139,14 @@ test("Orders HTTP: captura asíncrona conserva solo la acción 3DS", async (t) =
     metodoPagoId: "visa", tipoMetodoPago: "credit_card", cuotas: 1,
   });
   assert.equal(payload.capture_mode, "automatic_async");
-  assert.equal(payload.transactions.payments[0].payment_method.transaction_security.validation, "on_fraud_risk");
+  // Orders recibe la configuración 3DS en config.online; el endpoint rechaza
+  // transaction_security dentro del método de pago con unsupported_properties.
+  assert.deepEqual(payload.transactions.payments[0].payment_method, {
+    id: "visa", type: "credit_card", token: "token", installments: 1,
+  });
+  assert.deepEqual(payload.config, {
+    online: { transaction_security: { validation: "on_fraud_risk" } },
+  });
   assert.equal(orden.transactions.payments[0].payment_method.transaction_security.url, "https://banco.example.test/challenge");
   assert.equal(JSON.stringify(orden).includes("no-devolver"), false);
 });

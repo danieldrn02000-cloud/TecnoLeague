@@ -123,7 +123,10 @@ actualización idempotente del carrito entre checkout y retorno.
 Solo `CONFIRMADO`, verificado por el backend, actualiza el carrito.
 Una respuesta perdida conserva el intento y consulta; no genera otro cobro.
 
-Se solicita `transaction_security.validation: on_fraud_risk` y se expone una URL
+Se solicita `config.online.transaction_security.validation: on_fraud_risk`
+en la creación de la orden. La configuración no se envía dentro de
+`transactions.payments[].payment_method`: el endpoint la rechaza con
+`unsupported_properties`. Se expone una URL
 HTTPS del desafío obtenida de la orden verificada. Se acepta
 `payment_method.transaction_security.url` o `payment_method.redirect_url` cuando
 la orden requiere una acción. No se persisten las URLs del desafío.
