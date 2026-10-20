@@ -112,7 +112,9 @@ export class MercadoPagoOrdersService {
       total_amount: datos.total,
       external_reference: datos.referenciaExterna,
       ...(datos.modoCaptura === "automatic_async" ? {
-        config: { online: { transaction_security: { validation: "on_fraud_risk" } } },
+        config: { online: { transaction_security: {
+          validation: "on_fraud_risk", liability_shift: "required",
+        } } },
       } : {}),
 
       payer: {
@@ -257,6 +259,7 @@ export class MercadoPagoOrdersService {
     const camposPermitidos = new Set([
       "type", "processing_mode", "capture_mode", "currency", "total_amount", "external_reference",
       "config", "config.online", "config.online.transaction_security", "config.online.transaction_security.validation",
+      "config.online.transaction_security.liability_shift",
       "payer", "payer.email", "payer.identification", "payer.identification.type", "payer.identification.number",
       "transactions", "transactions.payments", "transactions.payments[0].amount",
       "transactions.payments[0].payment_method", "transactions.payments[0].payment_method.id",

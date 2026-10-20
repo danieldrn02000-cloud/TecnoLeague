@@ -145,7 +145,7 @@ test("Orders HTTP: captura asíncrona conserva solo la acción 3DS", async (t) =
     id: "visa", type: "credit_card", token: "token", installments: 1,
   });
   assert.deepEqual(payload.config, {
-    online: { transaction_security: { validation: "on_fraud_risk" } },
+    online: { transaction_security: { validation: "on_fraud_risk", liability_shift: "required" } },
   });
   assert.equal(orden.transactions.payments[0].payment_method.transaction_security.url, "https://banco.example.test/challenge");
   assert.equal(JSON.stringify(orden).includes("no-devolver"), false);

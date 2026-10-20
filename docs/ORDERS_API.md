@@ -123,8 +123,11 @@ actualización idempotente del carrito entre checkout y retorno.
 Solo `CONFIRMADO`, verificado por el backend, actualiza el carrito.
 Una respuesta perdida conserva el intento y consulta; no genera otro cobro.
 
-Se solicita `config.online.transaction_security.validation: on_fraud_risk`
-en la creación de la orden. La configuración no se envía dentro de
+Se solicita `config.online.transaction_security` con `validation: on_fraud_risk`
+y `liability_shift: required` en la creación de la orden, siguiendo el
+[ejemplo oficial de 3DS](https://github.com/mercadopago/sdk-nodejs/blob/master/src/examples/order/createWith3DS.ts).
+La configuración debe incluir ambas propiedades; enviar solo `validation`
+produce `required_properties`. No se envía dentro de
 `transactions.payments[].payment_method`: el endpoint la rechaza con
 `unsupported_properties`. Se expone una URL
 HTTPS del desafío obtenida de la orden verificada. Se acepta
