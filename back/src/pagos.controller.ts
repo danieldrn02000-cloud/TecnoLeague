@@ -10,7 +10,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
-import { WebhookSignatureValidator } from "mercadopago";
+import { InvalidWebhookSignatureError, WebhookSignatureValidator } from "mercadopago";
 import { PagosService } from "./pagos.service";
 
 @Controller("pagos")
@@ -26,7 +26,7 @@ export class PagosController {
     @Query("data.id") recursoId: string | undefined,
     @Body() body: unknown,
   ) {
-    const secreto = process.env.MP_WEBHOOK_SECRET;
+    const secreto = process.env.MP_WEBHOOK_SECRET?.trim();
     if (!secreto)
       throw new ServiceUnavailableException(
         "Falta MP_WEBHOOK_SECRET en el backend.",
@@ -47,8 +47,12 @@ export class PagosController {
         dataId: recursoId.toLowerCase(),
         secret: secreto,
       });
-    } catch {
-      this.logger.warn("Webhook rechazado: firma inválida.");
+    } catch (error) {
+      this.logger.warn(JSON.stringify({
+        resultado: "WEBHOOK_FIRMA_INVALIDA",
+        motivo: error instanceof InvalidWebhookSignatureError ? error.reason : "ERROR_VALIDACION",
+        requestId: /^[A-Za-z0-9_-]{1,150}$/.test(requestId) ? requestId : undefined,
+      }));
       throw new UnauthorizedException("Firma inválida.");
     }
     const notificacion = body as {

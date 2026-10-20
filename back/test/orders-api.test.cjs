@@ -1,12 +1,13 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { randomUUID } = require("node:crypto");
+const { randomUUID, createHmac } = require("node:crypto");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { buildSchema, graphql } = require("graphql");
 require("reflect-metadata");
 const { PagosService } = require("../dist/pagos.service");
 const { PagosResolver } = require("../dist/pagos.resolver");
+const { PagosController } = require("../dist/pagos.controller");
 const { MercadoPagoOrdersService, ErrorOrdersMP } = require("../dist/mercadopago-orders.service");
 
 test("Orders HTTP: payload automático, idempotencia y respuesta sin token", async (t) => {
@@ -54,12 +55,52 @@ test("Orders HTTP: timeout, 409 y 5xx son inciertos; errores no filtran el cuerp
   const servicio = new MercadoPagoOrdersService();
   const mocked = t.mock.method(globalThis, "fetch", async () => { throw new Error("secreto"); });
   await assert.rejects(servicio.consultarOrden("ORD1"), (e) => e instanceof ErrorOrdersMP && !e.rechazadoDefinitivo && !e.message.includes("secreto"));
-  for (const status of [400, 401, 403, 409, 422, 429, 500]) {
+  for (const status of [400, 401, 402, 403, 409, 422, 429, 500]) {
     mocked.mock.mockImplementation(async () => new Response("secreto", { status }));
     await assert.rejects(servicio.consultarOrden("ORD1"), (e) =>
       e instanceof ErrorOrdersMP && e.httpProveedor === status &&
       e.rechazadoDefinitivo === [400, 401, 403, 422].includes(status) && !e.message.includes("secreto"));
   }
+});
+
+test("Orders HTTP: 402 failed es rechazo definitivo; un 402 sin código sigue incierto", async (t) => {
+  const anterior = process.env.MP_ACCESS_TOKEN;
+  process.env.MP_ACCESS_TOKEN = "token-simulado";
+  t.after(() => {
+    if (anterior === undefined) delete process.env.MP_ACCESS_TOKEN;
+    else process.env.MP_ACCESS_TOKEN = anterior;
+  });
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({
+    errors: [{ code: "failed", details: ["transactions"] }],
+  }), { status: 402 }));
+  await assert.rejects(new MercadoPagoOrdersService().consultarOrden("ORD1"), error =>
+    error instanceof ErrorOrdersMP && error.httpProveedor === 402 && error.rechazadoDefinitivo);
+  assert.equal(new ErrorOrdersMP(402).rechazadoDefinitivo, false);
+});
+
+test("Webhook: valida ID alfanumérico y secreto limpio; rechaza firma ajena con diagnóstico seguro", async (t) => {
+  const anterior = process.env.MP_WEBHOOK_SECRET;
+  process.env.MP_WEBHOOK_SECRET = " secreto-prueba \n";
+  t.after(() => {
+    if (anterior === undefined) delete process.env.MP_WEBHOOK_SECRET;
+    else process.env.MP_WEBHOOK_SECRET = anterior;
+  });
+  const llamadas = [];
+  const avisos = [];
+  const controlador = new PagosController({ procesarWebhook: async (...args) => {
+    llamadas.push(args); return { resultado: "RECHAZADO" };
+  } });
+  controlador.logger = { warn: texto => avisos.push(JSON.parse(texto)) };
+  const id = "ORDTST123ABC", requestId = "request-123", ts = "1792470000";
+  const firmar = secret => `ts=${ts},v1=${createHmac("sha256", secret)
+    .update(`id:${id.toLowerCase()};request-id:${requestId};ts:${ts};`).digest("hex")}`;
+  const body = { type: "order", data: { id } };
+  await controlador.webhook(firmar("secreto-prueba"), requestId, id, body);
+  assert.deepEqual(llamadas, [["order", id]]);
+  await assert.rejects(controlador.webhook(firmar("otro-secreto"), requestId, id, body), e => e.status === 401);
+  assert.equal(llamadas.length, 1);
+  assert.equal(avisos[0].motivo, "SignatureMismatch");
+  assert.ok(!JSON.stringify(avisos).includes("secreto"));
 });
 
 test("Resolver: las nuevas mutaciones usan el usuario autenticado", async () => {
@@ -401,13 +442,13 @@ test("Orders y reservas sobre PostgreSQL real", {
     assert.equal(f.llamadas.length, 1);
   });
 
-  await t.test("un rechazo HTTP del reenvío no descarta un cobro anterior incierto", async (st) => {
+  for (const http of [400, 402]) await t.test(`HTTP ${http} del reenvío no descarta un cobro anterior incierto`, async (st) => {
     const f = await fixture(st);
     const crear = f.proveedor.crearYProcesarOrden;
     let primera = true;
     f.proveedor.crearYProcesarOrden = async datos => {
       if (primera) { primera = false; await crear(datos); throw new ErrorOrdersMP(null); }
-      throw new ErrorOrdersMP(400);
+      throw new ErrorOrdersMP(http, { codigo: "failed" });
     };
     await f.servicio.prepararCompra(f.compra, f.usuario.id);
     await assert.rejects(f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id));
@@ -524,6 +565,25 @@ test("Orders y reservas sobre PostgreSQL real", {
     assert.equal(result.solicitudRechazada, true);
     assert.match(result.aviso, /No se pudo iniciar el pago.*HTTP 400/);
     assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.producto.id } })).stock, 10);
+  });
+
+  await t.test("HTTP 402 failed termina como pago rechazado, libera stock una vez y no vuelve a cobrar", async (st) => {
+    const f = await fixture(st);
+    let llamadas = 0;
+    f.proveedor.crearYProcesarOrden = async () => {
+      llamadas++;
+      throw new ErrorOrdersMP(402, { codigo: "failed" });
+    };
+    await f.servicio.prepararCompra(f.compra, f.usuario.id);
+    const result = await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
+    assert.equal(result.estado, "RECHAZADO");
+    assert.equal(result.solicitudRechazada, false);
+    assert.match(result.aviso, /Mercado Pago rechazó el pago/);
+    await f.servicio.consultarIntento(f.compra.claveSolicitud, f.usuario.id);
+    await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
+    assert.equal(llamadas, 1);
+    assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.producto.id } })).stock, 10);
+    assert.equal(await db.pedido.count({ where: { usuarioId: f.usuario.id } }), 0);
   });
 
   await t.test("REDIRECCION conserva la conciliación de órdenes anteriores", async (st) => {
