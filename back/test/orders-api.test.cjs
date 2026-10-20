@@ -54,12 +54,27 @@ test("Orders HTTP: timeout, 409 y 5xx son inciertos; errores no filtran el cuerp
   const servicio = new MercadoPagoOrdersService();
   const mocked = t.mock.method(globalThis, "fetch", async () => { throw new Error("secreto"); });
   await assert.rejects(servicio.consultarOrden("ORD1"), (e) => e instanceof ErrorOrdersMP && !e.rechazadoDefinitivo && !e.message.includes("secreto"));
-  for (const status of [400, 401, 403, 409, 422, 429, 500]) {
+  for (const status of [400, 401, 402, 403, 409, 422, 429, 500]) {
     mocked.mock.mockImplementation(async () => new Response("secreto", { status }));
     await assert.rejects(servicio.consultarOrden("ORD1"), (e) =>
       e instanceof ErrorOrdersMP && e.httpProveedor === status &&
       e.rechazadoDefinitivo === [400, 401, 403, 422].includes(status) && !e.message.includes("secreto"));
   }
+});
+
+test("Orders HTTP: 402 failed es rechazo definitivo; un 402 sin código sigue incierto", async (t) => {
+  const anterior = process.env.MP_ACCESS_TOKEN;
+  process.env.MP_ACCESS_TOKEN = "token-simulado";
+  t.after(() => {
+    if (anterior === undefined) delete process.env.MP_ACCESS_TOKEN;
+    else process.env.MP_ACCESS_TOKEN = anterior;
+  });
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({
+    errors: [{ code: "failed", details: ["transactions"] }],
+  }), { status: 402 }));
+  await assert.rejects(new MercadoPagoOrdersService().consultarOrden("ORD1"), error =>
+    error instanceof ErrorOrdersMP && error.httpProveedor === 402 && error.rechazadoDefinitivo);
+  assert.equal(new ErrorOrdersMP(402).rechazadoDefinitivo, false);
 });
 
 test("Resolver: las nuevas mutaciones usan el usuario autenticado", async () => {
@@ -401,13 +416,13 @@ test("Orders y reservas sobre PostgreSQL real", {
     assert.equal(f.llamadas.length, 1);
   });
 
-  await t.test("un rechazo HTTP del reenvío no descarta un cobro anterior incierto", async (st) => {
+  for (const http of [400, 402]) await t.test(`HTTP ${http} del reenvío no descarta un cobro anterior incierto`, async (st) => {
     const f = await fixture(st);
     const crear = f.proveedor.crearYProcesarOrden;
     let primera = true;
     f.proveedor.crearYProcesarOrden = async datos => {
       if (primera) { primera = false; await crear(datos); throw new ErrorOrdersMP(null); }
-      throw new ErrorOrdersMP(400);
+      throw new ErrorOrdersMP(http, { codigo: "failed" });
     };
     await f.servicio.prepararCompra(f.compra, f.usuario.id);
     await assert.rejects(f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id));
@@ -524,6 +539,58 @@ test("Orders y reservas sobre PostgreSQL real", {
     assert.equal(result.solicitudRechazada, true);
     assert.match(result.aviso, /No se pudo iniciar el pago.*HTTP 400/);
     assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.producto.id } })).stock, 10);
+  });
+
+  await t.test("HTTP 402 failed termina como pago rechazado, libera stock una vez y no vuelve a cobrar", async (st) => {
+    const f = await fixture(st);
+    let llamadas = 0;
+    f.proveedor.crearYProcesarOrden = async () => {
+      llamadas++;
+      throw new ErrorOrdersMP(402, { codigo: "failed" });
+    };
+    await f.servicio.prepararCompra(f.compra, f.usuario.id);
+    const result = await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
+    assert.equal(result.estado, "RECHAZADO");
+    assert.equal(result.solicitudRechazada, false);
+    assert.match(result.aviso, /Mercado Pago rechazó el pago/);
+    await f.servicio.consultarIntento(f.compra.claveSolicitud, f.usuario.id);
+    await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
+    assert.equal(llamadas, 1);
+    assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.producto.id } })).stock, 10);
+    assert.equal(await db.pedido.count({ where: { usuarioId: f.usuario.id } }), 0);
+  });
+
+  await t.test("reparación de rechazo inicial histórico libera una vez y permite otra compra", async (st) => {
+    const f = await fixture(st);
+    await f.servicio.prepararCompra(f.compra, f.usuario.id);
+    const operacionId = randomUUID();
+    await db.operacionCobro.create({ data: {
+      id: operacionId, intentoId: f.compra.claveSolicitud,
+      claveSolicitud: randomUUID(), claveIdempotencia: operacionId,
+      huellaSolicitud: "rechazo-inicial-comprobado", estado: "INCIERTA", modoCaptura: "automatic",
+    } });
+    await db.intentoCompra.update({ where: { id: f.compra.claveSolicitud }, data: {
+      estado: "EN_PROCESO", ultimoError: "Orden todavía no vinculada; no iniciar otro cobro.",
+    } });
+    await assert.rejects(f.servicio.cerrarRechazoInicial402(f.compra.claveSolicitud, randomUUID()), /no coincide/);
+    const cerrado = await f.servicio.cerrarRechazoInicial402(f.compra.claveSolicitud, operacionId);
+    assert.equal(cerrado.estado, "RECHAZADO");
+    await f.servicio.cerrarRechazoInicial402(f.compra.claveSolicitud, operacionId);
+    await f.servicio.cancelarIntento(f.compra.claveSolicitud, f.usuario.id);
+    assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.producto.id } })).stock, 10);
+    assert.equal(f.llamadas.length, 0);
+    const nueva = await f.servicio.prepararCompra({ ...f.compra, claveSolicitud: randomUUID() }, f.usuario.id);
+    assert.equal(nueva.estado, "INICIADO");
+    assert.equal(nueva.operacionId, null);
+    assert.equal(await db.pedido.count({ where: { usuarioId: f.usuario.id } }), 0);
+  });
+
+  await t.test("la reparación no permite descartar una orden ya vinculada o aprobada", async (st) => {
+    const f = await fixture(st);
+    await f.servicio.prepararCompra(f.compra, f.usuario.id);
+    const resultado = await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
+    await assert.rejects(f.servicio.cerrarRechazoInicial402(f.compra.claveSolicitud, resultado.operacionId), /ya tiene una orden o pedido/);
+    assert.equal((await f.servicio.consultarIntento(f.compra.claveSolicitud, f.usuario.id)).estado, "CONFIRMADO");
   });
 
   await t.test("REDIRECCION conserva la conciliación de órdenes anteriores", async (st) => {

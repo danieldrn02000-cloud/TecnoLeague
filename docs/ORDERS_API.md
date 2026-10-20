@@ -134,6 +134,11 @@ reales ni disponibilidad de la cuenta de Mercado Pago.
 `ResultadoPago.tsx` muestra el resultado y la acción bancaria. `use-estado-pago.ts`
 comparte consultas acotadas, recuperación al volver a la pestaña, cancelación y
 actualización idempotente del carrito entre checkout y retorno.
+El seguimiento realiza como máximo 12 consultas por tanda (cada cinco segundos
+después de recibir la respuesta); un desafío bancario puede extender la tanda
+a 120 consultas. Volver a enfocar la ventana no reinicia el contador ni solapa
+peticiones. Al agotarse el límite se muestra una pausa y solo «Consultar estado»
+abre otra tanda. Un estado final detiene las consultas.
 Solo `CONFIRMADO`, verificado por el backend, actualiza el carrito.
 Una respuesta perdida conserva el intento y consulta; no genera otro cobro.
 
@@ -175,6 +180,10 @@ npm run test:checkout
 
 `solicitudRechazada` distingue un error HTTP al crear la orden de un rechazo
 bancario confirmado. Una solicitud inválida muestra «No se pudo iniciar el pago».
+En el POST inicial, `402` con código `failed` significa pago rechazado y termina
+el intento, liberando la reserva una sola vez. Un `402` sin ese código sigue
+siendo incierto. Un rechazo recibido al reenviar nunca descarta un cobro previo
+incierto ni libera su inventario.
 El backend registra `ERROR_CREAR_ORDEN_MP` con HTTP, código, causas y request ID;
 no registra cuerpos, mensajes del proveedor, tokens ni datos de tarjeta.
 El extractor admite `errors`, `cause`, `causes` y errores anidados. `campos`
@@ -203,3 +212,29 @@ en la aplicación de Mercado Pago. En el flujo Orders API actual, definir
 esa variable se usa para el callback del flujo anterior de redirección.
 Si el backend local y Render comparten la base de datos, ambos deben usar código
 y credenciales compatibles con las mismas órdenes y el mismo vendedor.
+Si el webhook indica firma inválida, comprueba que
+`MP_WEBHOOK_SECRET` en Render sea la firma secreta del webhook de la misma
+aplicación y entorno de Mercado Pago; no es el Access Token ni la Public Key.
+No desactives la validación. Tras corregir la configuración y desplegar, reenvía
+desde el panel de Mercado Pago las notificaciones fallidas de los intentos
+anteriores que quedaron inciertos. El código no los marca como rechazados
+retroactivamente: una respuesta de un reenvío no demuestra ausencia de cobro.
+
+### Cerrar un rechazo inicial histórico comprobado
+
+Si el log original demuestra `ERROR_CREAR_ORDEN_MP`, `http:402`, `codigo:failed`
+y `reenvio:false`, el intento anterior puede haber quedado `INCIERTA` por el
+tratamiento antiguo del 402. Con el backend compilado, el administrador puede ejecutar:
+
+```sh
+npm run checkout:cerrar-rechazo -- INTENTO_ID OPERACION_ID --confirmar-rechazo-inicial-402
+```
+
+El comando lee `DATABASE_URL` del entorno o `back/.env`. Usa exactamente los dos
+IDs del log inicial comprobado y la base de datos donde existe el intento.
+No usar para timeouts ni para un 402 recibido en un reenvío. El comando exige
+una operación histórica incierta sin orden ni pedido vinculados; no se expone
+al navegador. Cierra como `RECHAZADO`, libera la reserva una vez mediante la
+conciliación existente y permite preparar otra compra. Es idempotente y no cobra.
+No basta con borrar localStorage ni con cambiar el carrito: el intento se conserva
+en la base de datos para evitar cobros duplicados.

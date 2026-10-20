@@ -408,7 +408,9 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         if (rechazado) {
           await this.db.intentoCompra.updateMany({
             where: { id, estado: { in: pendientes } },
-            data: { ultimoError: `No se pudo iniciar el pago. ${error.message}` },
+            data: { ultimoError: error.httpProveedor === 402
+              ? "Mercado Pago rechazó el pago. Revisa los datos de la tarjeta y que las credenciales correspondan al mismo entorno."
+              : `No se pudo iniciar el pago. ${error.message}` },
           });
           return this.consultarIntento(id, usuarioId);
         }
@@ -582,6 +584,38 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     return this.consultarIntento(id, usuarioId);
   }
 
+  // Reparación administrativa, no expuesta en GraphQL. El operador debe haber
+  // comprobado en el log un POST INICIAL con http=402, codigo=failed y reenvio=false.
+  // No sirve para timeouts ni para rechazos de reenvíos de cobros inciertos.
+  async cerrarRechazoInicial402(id: string, operacionId: string) {
+    const usuarioId = await this.db.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM intentos_compra WHERE id = ${id} FOR UPDATE`;
+      const intento = await tx.intentoCompra.findUnique({ where: { id }, include: incluirIntento });
+      if (!intento || intento.modalidad !== "ORDERS_API") fallo("Intento Orders no encontrado.");
+      const operacion = intento.operaciones[0];
+      if (!operacion || operacion.id !== operacionId || intento.operaciones.length !== 1) {
+        fallo("La operación indicada no coincide con el intento.");
+      }
+      if (intento.pago?.idOrdenExterna || operacion.idOrdenExterna || intento.pedidoId) {
+        fallo("La operación ya tiene una orden o pedido. Debe conciliarse con Mercado Pago.");
+      }
+      if (operacion.estado === "FINALIZADA" && operacion.estadoProveedor === "HTTP_402") return intento.usuarioId;
+      if (!pendientes.includes(intento.estado) || operacion.estado !== "INCIERTA") {
+        fallo("La operación no es un rechazo histórico incierto; no se modificó.");
+      }
+      await tx.operacionCobro.update({ where: { id: operacionId }, data: {
+        estado: "FINALIZADA", estadoProveedor: "HTTP_402",
+      } });
+      await tx.intentoCompra.update({ where: { id }, data: {
+        ultimoError: "Mercado Pago rechazó el pago en el primer envío (HTTP 402). Conservamos tu carrito.",
+      } });
+      return intento.usuarioId;
+    });
+    // Reutiliza la conciliación existente: libera stock una sola vez y permite
+    // terminar la reparación incluso si el proceso anterior se interrumpió aquí.
+    return this.consultarIntento(id, usuarioId);
+  }
+
   async consultarIntento(id: string, usuarioId: number) {
     const intento = await this.db.intentoCompra.findFirst({
       where: { id, usuarioId },
@@ -605,8 +639,11 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
       include: { detalles: true, operaciones:true, pago: true },
     });
     const operacion = actual.operaciones[0];
-    const solicitudRechazada = actual.estado === "RECHAZADO" && !!operacion?.estadoProveedor?.startsWith("HTTP_");
-    if (!aviso && solicitudRechazada) {
+    const rechazoCobro = actual.estado === "RECHAZADO" && operacion?.estadoProveedor === "HTTP_402";
+    const solicitudRechazada = actual.estado === "RECHAZADO" && !!operacion?.estadoProveedor?.startsWith("HTTP_") && !rechazoCobro;
+    if (!aviso && rechazoCobro) {
+      aviso = actual.ultimoError ?? "Mercado Pago rechazó el pago. Conservamos tu carrito.";
+    } else if (!aviso && solicitudRechazada) {
       aviso = actual.ultimoError ?? "No se pudo iniciar el pago. Revisa la configuración de Mercado Pago.";
     } else if (!aviso && pendientes.includes(actual.estado) && operacion && !actual.pago?.idOrdenExterna) {
       aviso = operacion.estado === "ENVIADA"

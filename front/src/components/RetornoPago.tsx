@@ -30,6 +30,7 @@ export function RetornoPago({
         <ResultadoPago
           estado={seguimiento.estado}
           ocupado={seguimiento.consultando}
+          pausado={seguimiento.pausado}
           error={seguimiento.error}
           onConsultar={seguimiento.revisar}
           onCancelar={() => void seguimiento.cancelar()}

@@ -23,6 +23,7 @@
     "test:checkout": "node --test scripts/test-checkout-recuperacion.cjs && npm run test -w front -- src/screens/Checkout.test.tsx src/components/tarjeta.test.tsx src/components/RetornoPago.test.tsx",
     "test:orders": "npm run build -w back && node --test back/test/orders-api.test.cjs",
     "diagnostico:orden": "node scripts/diagnostico-orden-mp.cjs",
+    "checkout:cerrar-rechazo": "node scripts/cerrar-rechazo-orders.cjs",
     "test:front": "npm run test -w front"
   },
   "devDependencies": {
