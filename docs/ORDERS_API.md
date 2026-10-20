@@ -33,9 +33,22 @@ El backend necesita `MP_ACCESS_TOKEN`, `MP_COLLECTOR_ID` (vendedor asociado al
 token) y `MP_WEBHOOK_SECRET`. Configura en la aplicación de Mercado Pago el
 webhook público HTTPS `/pagos/webhook` y eventos de Orders. Las credenciales
 deben corresponder al mismo escenario de pruebas o producción.
-El frontend necesita `PUBLIC_MP_PUBLIC_KEY` en `front/.env` y reiniciarse después
-de cambiarla. Public Key y Access Token deben corresponder al mismo escenario.
+El frontend necesita `PUBLIC_MP_PUBLIC_KEY` en `front/.env` para desarrollo local
+y reiniciarse después de cambiarla. Public Key y Access Token deben corresponder al mismo escenario.
 El flujo anterior conserva sus variables de retorno y callback.
+
+### Netlify
+
+No se sube `front/.env`. Define `PUBLIC_MP_PUBLIC_KEY` en las variables del sitio,
+con scope **Builds** y un valor para el contexto utilizado (**Production**,
+**Deploy previews** o la rama correspondiente). No basta con scope Functions.
+La clave pública se incorpora al JavaScript del navegador durante el build:
+guardar la variable no cambia un deploy existente. Ejecuta un nuevo deploy
+con build después de configurarla; no publiques de nuevo un artefacto antiguo.
+El build de Netlify se detiene con un mensaje explícito si la variable no está
+disponible, para evitar publicar un formulario de pago sin configurar.
+Solo `PUBLIC_MP_PUBLIC_KEY` va al navegador; `MP_ACCESS_TOKEN` y
+`MP_WEBHOOK_SECRET` permanecen en el backend.
 
 ## Contrato para el frontend
 

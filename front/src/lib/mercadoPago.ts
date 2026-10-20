@@ -84,7 +84,9 @@ export async function obtenerMercadoPago(): Promise<InstanciaMercadoPago> {
   const publicKey = import.meta.env.PUBLIC_MP_PUBLIC_KEY?.trim();
 
   if (!publicKey) {
-    throw new Error("Falta PUBLIC_MP_PUBLIC_KEY en front/.env.");
+    throw new Error(import.meta.env.DEV
+      ? "Falta PUBLIC_MP_PUBLIC_KEY en front/.env."
+      : "El pago con tarjeta no está disponible. Falta configurar la clave pública de Mercado Pago en la compilación del sitio.");
   }
 
   const MercadoPago = await cargarSDK();
