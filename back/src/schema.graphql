@@ -305,6 +305,7 @@ type Mutation {
 """Checkout Orders: reservar no crea un pedido."""
 enum EstadoIntento { INICIADO EN_PROCESO CONFIRMADO RECHAZADO CANCELADO EXPIRADO }
 type RenglonIntento { productoId: Int!, cantidad: Int! }
+type AutenticacionPago { url: String! }
 type EstadoCheckout {
   intentoId: ID!
   estado: EstadoIntento!
@@ -315,6 +316,9 @@ type EstadoCheckout {
   total: String!
   moneda: String!
   operacionId: ID
+  estadoOperacion: EstadoOperacionCobro
+  modalidad: ModalidadCheckout!
+  autenticacion: AutenticacionPago
   estadoOperacion: EstadoOperacionCobro
   modalidad: ModalidadCheckout!
   autenticacion: AutenticacionPago

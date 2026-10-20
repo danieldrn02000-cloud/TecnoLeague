@@ -35,9 +35,13 @@ export interface DatosPagoInput {
   tipoMetodoPago: "credit_card" | "debit_card";
   cuotas: number;
   email: string;
+<<<<<<< HEAD
   identificacion?:{ tipo: string;
     numero:string
   } | null;
+=======
+  identificacion?: { tipo: string; numero: string } | null;
+>>>>>>> ccf07dd4fa3e5bbb650a367aa5603bcded4a8e29
 }
 export interface UsuarioAutenticado {
   id: number;

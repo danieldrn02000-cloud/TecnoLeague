@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 
 export type CrearOrdenInput = {
+  modoCaptura?: "automatic" | "automatic_async";
   // Siempre calculado por el backend, nunca tomado del frontend.
   total: string;
   referenciaExterna: string;
@@ -43,6 +44,10 @@ export type OrdenMP = {
       status_detail?: string;
       amount?: string;
       paid_amount?: string;
+      payment_method?: {
+        redirect_url?: string;
+        transaction_security?: { url?: string; type?: string; status?: string };
+      };
     }>;
   };
 };
@@ -59,9 +64,6 @@ export class ErrorOrdersMP extends ServiceUnavailableException {
         ? "No se pudo confirmar la respuesta de Mercado Pago."
         : `Mercado Pago respondió HTTP ${httpProveedor}.`,
     );
-    //Un timeout, conflicto de idempotencia, 429, 5xx, o respuesta incompleta, no muestra ausensia de cobro
-    this.rechazadoDefinitivo = httpProveedor !== null &&
-    [400,401,403,404,405,422].includes(httpProveedor);
   }
 }
 
@@ -100,8 +102,6 @@ export class MercadoPagoOrdersService {
     const payload = {
       type: "online",
       processing_mode: "automatic",
-      capture_mode:"automatic",
-      currency:"MXN",
       total_amount: datos.total,
       external_reference: datos.referenciaExterna,
 
@@ -126,6 +126,9 @@ export class MercadoPagoOrdersService {
               type: datos.tipoMetodoPago,
               token: datos.token,
               installments: datos.cuotas,
+              ...(datos.modoCaptura === "automatic_async" ? {
+                transaction_security: { validation: "on_fraud_risk" },
+              } : {}),
             },
           },
         ],
@@ -212,19 +215,6 @@ export class MercadoPagoOrdersService {
       throw new ErrorOrdersMP(respuesta.status);
     }
 
-    const orden = resultado as Record<string, unknown>;
-    // No propagar tokens ni otros datos personales devueltos por el proveedor.
-    return {
-      id: resultado.id,
-      status: resultado.status,
-      status_detail: typeof orden.status_detail === "string" ? orden.status_detail : undefined,
-      external_reference: typeof orden.external_reference === "string" ? orden.external_reference : undefined,
-      total_amount: typeof orden.total_amount === "string" ? orden.total_amount : undefined,
-      total_paid_amount: typeof orden.total_paid_amount === "string" ? orden.total_paid_amount : undefined,
-      currency: typeof orden.currency === "string" ? orden.currency : undefined,
-      country_code: typeof orden.country_code === "string" ? orden.country_code : undefined,
-      user_id: typeof orden.user_id === "string" || typeof orden.user_id === "number" ? orden.user_id : undefined,
-      last_updated_date: typeof orden.last_updated_date === "string" ? orden.last_updated_date : undefined,
-    };
+    return resultado as OrdenMP;
   }
 }

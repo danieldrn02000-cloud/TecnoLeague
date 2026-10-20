@@ -4,30 +4,30 @@ import { dinero, graphql, PRODUCTO } from "../api";
 import { Cantidad, ErrorCarga, Imagen, Vacio } from "../components/ui";
 import { useCarrito } from "../store";
 import type { Navegar, Producto } from "../types";
-export function Resumen({ children }: { children?: React.ReactNode }) {
+export function Resumen({ children, totalConfirmado }: { children?: React.ReactNode; totalConfirmado?: string }) {
   const { total, unidades } = useCarrito();
+  const importe = totalConfirmado === undefined ? total : Number(totalConfirmado);
   return (
     <aside className="resumen panel">
       <span className="eyebrow">TU SELECCIÓN</span>
       <h2>Resumen del pedido</h2>
       <div>
         <span>Subtotal ({unidades} artículos)</span>
-        <strong>{dinero(total)}</strong>
+        <strong>{dinero(importe)}</strong>
       </div>
       <div>
-        <span>Envío de demostración</span>
+        <span>Envío</span>
         <strong className="accent">Sin costo</strong>
       </div>
       <div className="resumen-total">
         <span>Total</span>
         <strong>
-          {dinero(total)} <small>MXN</small>
+          {dinero(importe)} <small>MXN</small>
         </strong>
       </div>
       {children}
       <p className="resumen-nota">
-        <ShieldCheck size={18} /> Compra de demostración. No se realizan cargos
-        reales.
+        <ShieldCheck size={18} /> Pago procesado por Mercado Pago. Consulta su resultado antes de volver a pagar.
       </p>
     </aside>
   );
