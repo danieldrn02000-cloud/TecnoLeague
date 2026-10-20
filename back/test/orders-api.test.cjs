@@ -291,9 +291,11 @@ test("Orders y reservas sobre PostgreSQL real", {
     await f.servicio.procesarPago(preparado.intentoId, f.pago, f.usuario.id);
     assert.equal(f.llamadas.length, 1);
     assert.equal(f.llamadas[0].total, "51.00");
+    assert.equal(f.llamadas[0].modoCaptura, "automatic");
     assert.equal(await db.pedido.count({ where: { usuarioId: f.usuario.id } }), 1);
     const op = await db.operacionCobro.findFirstOrThrow({ where: { intentoId: preparado.intentoId } });
     assert.equal(op.estado, "FINALIZADA");
+    assert.equal(op.modoCaptura, "automatic");
     assert.equal(JSON.stringify(op).includes(f.pago.token), false);
     assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.producto.id } })).stock, 8);
   });
@@ -381,6 +383,7 @@ test("Orders y reservas sobre PostgreSQL real", {
     assert.equal(result.estado, "CONFIRMADO");
     assert.equal(f.llamadas.length, 2);
     assert.equal(f.llamadas[0].claveIdempotencia, f.llamadas[1].claveIdempotencia);
+    assert.equal(f.llamadas[0].modoCaptura, f.llamadas[1].modoCaptura);
     assert.equal(f.ordenes.size, 1);
   });
 
@@ -466,7 +469,9 @@ test("Orders y reservas sobre PostgreSQL real", {
     const result = await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
     assert.equal(result.estado, "EN_PROCESO");
     assert.equal(result.autenticacion.url, "https://banco.example.test/challenge");
-    assert.equal(f.llamadas[0].modoCaptura, "automatic_async");
+    // Si el proveedor exige autenticación, se muestra su desafío aunque
+    // TecnoLeague no lo haya solicitado en el pago nuevo.
+    assert.equal(f.llamadas[0].modoCaptura, "automatic");
     assert.equal(await db.pedido.count({ where: { usuarioId: f.usuario.id } }), 0);
     const orden = [...f.ordenes.values()][0];
     for (const url of ["http://banco.example.test/challenge", "javascript:alert(1)", "https://usuario:clave@banco.example.test/challenge"]) {

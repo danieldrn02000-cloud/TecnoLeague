@@ -24,9 +24,10 @@ intentos anteriores. No usar `db push`, `migrate reset` ni editar migraciones
 ya aplicadas para instalar este cambio.
 
 La migración `202610200001_orders_autenticacion` agrega el modo de captura de la
-operación. Conserva `automatic` en operaciones anteriores y las nuevas se crean
-con `automatic_async`, para admitir autenticación bancaria sin cambiar los
-parámetros de reenvíos anteriores.
+operación. Los pagos nuevos se crean con `automatic`, sin solicitar configuración
+de 3DS. Los reenvíos conservan el modo guardado, incluido `automatic_async` en
+operaciones iniciadas con la configuración anterior. Este ajuste no requiere
+una migración adicional ni nuevas variables de entorno.
 
 El backend necesita `MP_ACCESS_TOKEN`, `MP_COLLECTOR_ID` (vendedor asociado al
 token) y `MP_WEBHOOK_SECRET`. Configura en la aplicación de Mercado Pago el
@@ -123,8 +124,14 @@ actualización idempotente del carrito entre checkout y retorno.
 Solo `CONFIRMADO`, verificado por el backend, actualiza el carrito.
 Una respuesta perdida conserva el intento y consulta; no genera otro cobro.
 
-Se solicita `config.online.transaction_security` con `validation: on_fraud_risk`
-y `liability_shift: required` en la creación de la orden, siguiendo el
+Los pagos nuevos usan `capture_mode: automatic` y omiten
+`config.online.transaction_security`. No se solicita un desafío 3DS ni se muestra
+una opción para activarlo. Esto no garantiza aprobación ni permite omitir una
+autenticación exigida por Mercado Pago o el emisor.
+
+Para conservar la idempotencia de operaciones anteriores, los reenvíos guardados
+con `automatic_async` mantienen `config.online.transaction_security` con
+`validation: on_fraud_risk` y `liability_shift: required`, siguiendo el
 [ejemplo oficial de 3DS](https://github.com/mercadopago/sdk-nodejs/blob/master/src/examples/order/createWith3DS.ts).
 La configuración debe incluir ambas propiedades; enviar solo `validation`
 produce `required_properties`. No se envía dentro de

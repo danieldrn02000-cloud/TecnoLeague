@@ -363,7 +363,9 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         claveSolicitud: datos.claveOperacion,
         claveIdempotencia: operacionId,
         huellaSolicitud: huella,
-        modoCaptura: "automatic_async",
+        // Los pagos nuevos no solicitan 3DS desde TecnoLeague. El modo queda
+        // guardado para conservar el mismo payload en reenvíos idempotentes.
+        modoCaptura: "automatic",
       } });
       await tx.intentoCompra.update({ where: { id }, data: { estado: "EN_PROCESO" } });
       return { intento, operacion, enviar: true, reenvio: false };
