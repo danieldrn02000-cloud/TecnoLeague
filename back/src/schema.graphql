@@ -312,6 +312,7 @@ type EstadoCheckout {
   pedidoId: Int
   expiraEn: String!
   aviso: String
+  solicitudRechazada: Boolean!
   checkoutUrl: String
   total: String!
   moneda: String!

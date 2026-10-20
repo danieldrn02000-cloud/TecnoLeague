@@ -385,6 +385,14 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         });
         await this.vincularOrdenApi(preparada.operacion.id, orden);
       } catch (error) {
+        if (error instanceof ErrorOrdersMP) {
+          this.logger.error(JSON.stringify({
+            intentoId: id, operacionId: preparada.operacion.id,
+            resultado: "ERROR_CREAR_ORDEN_MP", http: error.httpProveedor,
+            codigo: error.diagnostico.codigo, causas: error.diagnostico.causas,
+            requestId: error.diagnostico.requestId, reenvio: preparada.reenvio,
+          }));
+        }
         // Un error del REENVÍO no demuestra que la primera llamada no cobró.
         const rechazado = !preparada.reenvio && error instanceof ErrorOrdersMP && error.rechazadoDefinitivo;
         await this.db.operacionCobro.updateMany({
@@ -394,7 +402,13 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
             estadoProveedor: rechazado ? `HTTP_${error.httpProveedor}` : undefined,
           },
         });
-        if (rechazado) return this.consultarIntento(id, usuarioId);
+        if (rechazado) {
+          await this.db.intentoCompra.updateMany({
+            where: { id, estado: { in: pendientes } },
+            data: { ultimoError: `No se pudo iniciar el pago. ${error.message}` },
+          });
+          return this.consultarIntento(id, usuarioId);
+        }
         await this.registrarFallo(id, error);
         // No guardar el token. El webhook recupera la orden; un reenvío explícito
         // solo acepta la misma clave y el mismo payload con idempotencia MP.
@@ -585,8 +599,17 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     }
     const actual = await this.db.intentoCompra.findUniqueOrThrow({
       where: { id },
-      include: { detalles: true, operaciones:true },
+      include: { detalles: true, operaciones:true, pago: true },
     });
+    const operacion = actual.operaciones[0];
+    const solicitudRechazada = actual.estado === "RECHAZADO" && !!operacion?.estadoProveedor?.startsWith("HTTP_");
+    if (!aviso && solicitudRechazada) {
+      aviso = actual.ultimoError ?? "No se pudo iniciar el pago. Revisa la configuración de Mercado Pago.";
+    } else if (!aviso && pendientes.includes(actual.estado) && operacion && !actual.pago?.idOrdenExterna) {
+      aviso = operacion.estado === "ENVIADA"
+        ? "Estamos esperando la respuesta del pago. No inicies otro cobro."
+        : "Aún no conocemos el resultado. Conservamos el intento y lo verificaremos sin crear otro cobro.";
+    }
     return {
       intentoId: id,
       total:actual.total.toFixed(2),
@@ -599,6 +622,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
       pedidoId: actual.pedidoId,
       expiraEn: actual.expiraEn.toISOString(),
       aviso,
+      solicitudRechazada,
       checkoutUrl: pendientes.includes(actual.estado)
         ? actual.checkoutUrl
         : null,
@@ -734,6 +758,12 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
             }
             return { resultado: rechazado ? "RECHAZADO" : cancelar ? "CANCELADO" : "EXPIRADO", autenticacion: null };
           }
+          if (intento.modalidad === "ORDERS_API" && !cancelar) {
+            // Consultar mientras el POST sigue en curso es esperado. Un timeout
+            // conserva su incertidumbre; no crear órdenes ni liberar inventario.
+            await tx.intentoCompra.update({ where: { id }, data: { proximaRevision: new Date(Date.now() + 60_000) } });
+            return { resultado: "ESPERANDO_ORDEN", autenticacion: null };
+          }
           throw new ServiceUnavailableException("Orden todavía no vinculada; no iniciar otro cobro.");
         }
         let orden: RecursoMP = intento.modalidad === "ORDERS_API"
@@ -773,6 +803,13 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
           );
         }
         const estadoProveedor = `${orden.status ?? "unknown"}:${orden.status_detail ?? "unknown"}`;
+        if (pago.estadoProveedor !== estadoProveedor) {
+          const codigo = (valor: string | undefined) => valor && /^[A-Za-z0-9_.-]{1,100}$/.test(valor) ? valor : undefined;
+          this.logger.log(JSON.stringify({
+            intentoId: id, ordenId: pago.idOrdenExterna, resultado: "ORDEN_MP_VERIFICADA",
+            estado: codigo(orden.status), detalle: codigo(orden.status_detail),
+          }));
+        }
         if (intento.modalidad === "ORDERS_API") {
           await tx.operacionCobro.updateMany({ where: { intentoId: id }, data: {
             estado: acreditado() || terminal() ? "FINALIZADA" : "VINCULADA",

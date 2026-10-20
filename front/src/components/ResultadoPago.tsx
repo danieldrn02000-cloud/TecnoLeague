@@ -19,7 +19,7 @@ export function ResultadoPago({ estado, ocupado, error, onConsultar, onCancelar,
     INICIADO: reserva ? "Tu compra está preparada" : "Estamos verificando tu pago",
     EN_PROCESO: estado.autenticacion ? "Autoriza el pago con tu banco" : "Estamos verificando tu pago",
     CONFIRMADO: "Pago aprobado",
-    RECHAZADO: "Pago rechazado",
+    RECHAZADO: estado.solicitudRechazada ? "No se pudo iniciar el pago" : "Pago rechazado",
     CANCELADO: "Pago cancelado",
     EXPIRADO: "La reserva venció",
   };

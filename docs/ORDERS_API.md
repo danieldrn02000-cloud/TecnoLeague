@@ -144,3 +144,27 @@ Pruebas de recuperación y componentes:
 ```sh
 npm run test:checkout
 ```
+
+## Diagnóstico de creación y webhook
+
+`solicitudRechazada` distingue un error HTTP al crear la orden de un rechazo
+bancario confirmado. Una solicitud inválida muestra «No se pudo iniciar el pago».
+El backend registra `ERROR_CREAR_ORDEN_MP` con HTTP, código, causas y request ID;
+no registra cuerpos, mensajes del proveedor, tokens ni datos de tarjeta.
+Una orden consultada y validada registra `ORDEN_MP_VERIFICADA` con estado y detalle
+cuando cambian; permite identificar un rechazo del proveedor con HTTP exitoso.
+Los errores de red conocidos se identifican mediante códigos como `ENOTFOUND`,
+`ECONNRESET` o `TIMEOUT` sin imprimir direcciones ni credenciales.
+
+Una consulta mientras la orden se está creando devuelve un estado pendiente;
+no es un rechazo ni provoca otro cobro. Un resultado incierto conserva el stock
+y no permite cancelar localmente sin verificar el proveedor.
+
+La creación de la orden conecta el backend con `api.mercadopago.com`.
+El webhook conecta Mercado Pago con el backend público después de esa operación.
+La URL debe ser `https://<servicio>.onrender.com/pagos/webhook` y estar registrada
+en la aplicación de Mercado Pago. En el flujo Orders API actual, definir
+`MP_WEBHOOK_URL` en `.env` no registra por sí solo la URL en Mercado Pago;
+esa variable se usa para el callback del flujo anterior de redirección.
+Si el backend local y Render comparten la base de datos, ambos deben usar código
+y credenciales compatibles con las mismas órdenes y el mismo vendedor.

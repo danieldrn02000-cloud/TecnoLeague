@@ -5,6 +5,7 @@ export type EstadoCheckout = {
   estado: "INICIADO" | "EN_PROCESO" | "CONFIRMADO" | "RECHAZADO" | "CANCELADO" | "EXPIRADO";
   pedidoId: number | null;
   aviso: string | null;
+  solicitudRechazada?: boolean;
   checkoutUrl: string | null;
   expiraEn: string;
   renglones: RenglonCompra[];
@@ -15,7 +16,7 @@ export type EstadoCheckout = {
   estadoOperacion: "ENVIADA" | "INCIERTA" | "VINCULADA" | "FINALIZADA" | null;
   autenticacion: { url: string } | null;
 };
-export const CAMPOS_CHECKOUT = `intentoId estado pedidoId expiraEn aviso checkoutUrl total moneda modalidad operacionId estadoOperacion autenticacion{url} renglones{productoId cantidad}`;
+export const CAMPOS_CHECKOUT = `intentoId estado pedidoId expiraEn aviso solicitudRechazada checkoutUrl total moneda modalidad operacionId estadoOperacion autenticacion{url} renglones{productoId cantidad}`;
 export const CONSULTAR_INTENTO = `query($id:ID!){estadoIntento(intentoId:$id){${CAMPOS_CHECKOUT}}}`;
 export const PREPARAR_COMPRA = `mutation($datos:PedidoInput!){prepararCompra(datos:$datos){${CAMPOS_CHECKOUT}}}`;
 export const PROCESAR_PAGO = `mutation($id:ID!,$pago:DatosPagoInput!){procesarPago(intentoId:$id,datosPago:$pago){${CAMPOS_CHECKOUT}}}`;

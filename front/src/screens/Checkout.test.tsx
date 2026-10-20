@@ -149,6 +149,17 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Checkout dentro del sitio", () => {
+  it("distingue una solicitud inválida de un rechazo bancario", async () => {
+    procesar = async id => estado(id, {
+      estado: "RECHAZADO", solicitudRechazada: true, operacionId: "op", estadoOperacion: "FINALIZADA",
+      aviso: "No se pudo iniciar el pago. Mercado Pago respondió HTTP 400.",
+    });
+    abrir(); await preparar();
+    fireEvent.click(screen.getByRole("button", { name: "Pagar 99.00" }));
+    await screen.findByRole("heading", { name: "No se pudo iniciar el pago" });
+    expect(screen.queryByRole("heading", { name: "Pago rechazado" })).toBeNull();
+    expect(JSON.parse(localStorage.getItem("tl-carrito-v1")!)[0].cantidad).toBe(2);
+  });
   it("prepara antes de tokenizar y utiliza el total del servidor", async () => {
     const url = window.location.href;
     abrir();

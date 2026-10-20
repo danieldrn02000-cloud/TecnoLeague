@@ -73,6 +73,25 @@ test("Resolver: las nuevas mutaciones usan el usuario autenticado", async () => 
   assert.equal(llamadas[1][2], 7);
 });
 
+test("Orders HTTP: el diagnóstico conserva códigos y descarta datos sensibles", async (t) => {
+  const anterior = process.env.MP_ACCESS_TOKEN;
+  process.env.MP_ACCESS_TOKEN = "token-simulado";
+  t.after(() => {
+    if (anterior === undefined) delete process.env.MP_ACCESS_TOKEN;
+    else process.env.MP_ACCESS_TOKEN = anterior;
+  });
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({
+    error: "bad_request", message: "token y correo secreto@example.test",
+    cause: [{ code: "invalid_properties", message: "dato-sensible" }, { code: "correo@privado.test" }],
+  }), { status: 400, headers: { "x-request-id": "request-123" } }));
+  await assert.rejects(new MercadoPagoOrdersService().consultarOrden("ORD1"), error => {
+    assert.deepEqual(error.diagnostico, { codigo: "bad_request", causas: ["invalid_properties"], requestId: "request-123" });
+    assert.ok(!JSON.stringify(error).includes("secreto@example.test"));
+    assert.ok(!JSON.stringify(error).includes("dato-sensible"));
+    return true;
+  });
+});
+
 test("Orders HTTP: captura asíncrona conserva solo la acción 3DS", async (t) => {
   const anterior = process.env.MP_ACCESS_TOKEN;
   process.env.MP_ACCESS_TOKEN = "token-simulado";
@@ -226,6 +245,29 @@ test("Orders y reservas sobre PostgreSQL real", {
     assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.producto.id } })).stock, 8);
   });
 
+  await t.test("consultar durante la creación no registra una falsa falla de conexión", async (st) => {
+    const f = await fixture(st);
+    await f.servicio.prepararCompra(f.compra, f.usuario.id);
+    let liberar;
+    let iniciado;
+    const comienzo = new Promise(resolve => { iniciado = resolve; });
+    const espera = new Promise(resolve => { liberar = resolve; });
+    const crear = f.proveedor.crearYProcesarOrden;
+    const errores = [];
+    f.servicio.logger.error = mensaje => errores.push(mensaje);
+    f.proveedor.crearYProcesarOrden = async datos => { iniciado(); await espera; return crear(datos); };
+    const pago = f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
+    await comienzo;
+    try {
+      const estado = await f.servicio.consultarIntento(f.compra.claveSolicitud, f.usuario.id);
+      assert.equal(estado.estado, "EN_PROCESO");
+      assert.equal(estado.estadoOperacion, "ENVIADA");
+      assert.match(estado.aviso, /esperando la respuesta/);
+      assert.equal(errores.length, 0);
+    } finally { liberar(); }
+    assert.equal((await pago).estado, "CONFIRMADO");
+  });
+
   await t.test("otro usuario, importe cliente y débito con cuotas no se aceptan", async (st) => {
     const f = await fixture(st);
     await f.servicio.prepararCompra(f.compra, f.usuario.id);
@@ -241,6 +283,8 @@ test("Orders y reservas sobre PostgreSQL real", {
 
   await t.test("rechazo verificado libera stock una sola vez", async (st) => {
     const f = await fixture(st);
+    const eventos = [];
+    f.servicio.logger.log = mensaje => eventos.push(JSON.parse(mensaje));
     const crear = f.proveedor.crearYProcesarOrden;
     f.proveedor.crearYProcesarOrden = async datos => {
       const orden = await crear(datos);
@@ -250,6 +294,8 @@ test("Orders y reservas sobre PostgreSQL real", {
     await f.servicio.prepararCompra(f.compra, f.usuario.id);
     const result = await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
     assert.equal(result.estado, "RECHAZADO");
+    assert.equal(result.solicitudRechazada, false);
+    assert.ok(eventos.some(e => e.resultado === "ORDEN_MP_VERIFICADA" && e.estado === "failed" && e.detalle === "rejected"));
     await f.servicio.consultarIntento(f.compra.claveSolicitud, f.usuario.id);
     assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.producto.id } })).stock, 10);
     assert.equal(await db.pedido.count({ where: { usuarioId: f.usuario.id } }), 0);
@@ -414,6 +460,8 @@ test("Orders y reservas sobre PostgreSQL real", {
     await f.servicio.prepararCompra(f.compra, f.usuario.id);
     const result = await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
     assert.equal(result.estado, "RECHAZADO");
+    assert.equal(result.solicitudRechazada, true);
+    assert.match(result.aviso, /No se pudo iniciar el pago.*HTTP 400/);
     assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.producto.id } })).stock, 10);
   });
 

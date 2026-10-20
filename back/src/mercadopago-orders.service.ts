@@ -58,11 +58,12 @@ export class ErrorOrdersMP extends ServiceUnavailableException {
   readonly rechazadoDefinitivo: boolean;
   constructor(
     public readonly httpProveedor: number | null,
+    public readonly diagnostico: { codigo?: string; causas?: string[]; requestId?: string } = {},
   ) {
     super(
       httpProveedor === null
         ? "No se pudo confirmar la respuesta de Mercado Pago."
-        : `Mercado Pago respondió HTTP ${httpProveedor}.`,
+        : `Mercado Pago respondió HTTP ${httpProveedor}${diagnostico.codigo ? ` (${diagnostico.codigo})` : ""}.`,
     );
     // Un timeout, conflicto de idempotencia, 429, 5xx o respuesta incompleta
     // nunca demuestra ausencia de cobro.
@@ -190,14 +191,33 @@ export class MercadoPagoOrdersService {
           signal: AbortSignal.timeout(15_000),
         },
       );
-    } catch {
+    } catch (error) {
       // Incluye timeout: la orden podría haberse creado.
-      throw new ErrorOrdersMP(null);
+      let codigo = "ERROR_RED";
+      if (error && typeof error === "object") {
+        if ("name" in error && error.name === "TimeoutError") codigo = "TIMEOUT";
+        const causa = "cause" in error ? error.cause : null;
+        const candidato = causa && typeof causa === "object" && "code" in causa ? causa.code : null;
+        if (typeof candidato === "string" && ["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "CERT_HAS_EXPIRED", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "UND_ERR_CONNECT_TIMEOUT"].includes(candidato)) codigo = candidato;
+      }
+      throw new ErrorOrdersMP(null, { codigo });
     }
 
     if (!respuesta.ok) {
-      // No exponer el cuerpo: puede contener datos del comprador.
-      throw new ErrorOrdersMP(respuesta.status);
+      // Extraer solo códigos y el ID de soporte; nunca mensajes ni cuerpos.
+      const cuerpo: unknown = await respuesta.json().catch(() => null);
+      const codigo = (v: unknown) => typeof v === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(v)
+        ? v : typeof v === "number" && Number.isSafeInteger(v) ? String(v) : undefined;
+      const datos = cuerpo && typeof cuerpo === "object" ? cuerpo as Record<string, unknown> : {};
+      const causas = Array.isArray(datos.cause) ? datos.cause.slice(0, 10).flatMap((c: unknown) => {
+        const valor = c && typeof c === "object" && "code" in c ? codigo(c.code) : undefined;
+        return valor ? [valor] : [];
+      }) : [];
+      throw new ErrorOrdersMP(respuesta.status, {
+        codigo: codigo(datos.error) ?? codigo(datos.code),
+        causas,
+        requestId: codigo(respuesta.headers.get("x-request-id")),
+      });
     }
 
     let resultado: unknown;
