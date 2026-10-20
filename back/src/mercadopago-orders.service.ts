@@ -68,10 +68,7 @@ export class ErrorOrdersMP extends ServiceUnavailableException {
     // Un timeout, conflicto de idempotencia, 429, 5xx o respuesta incompleta
     // nunca demuestra ausencia de cobro.
     this.rechazadoDefinitivo = httpProveedor !== null &&
-      ([400, 401, 403, 404, 405, 422].includes(httpProveedor) ||
-        // Orders devuelve 402 + failed al rechazar la transacción del POST.
-        // Otros 402 sin ese código se conservan como inciertos.
-        (httpProveedor === 402 && diagnostico.codigo === "failed"));
+      [400, 401, 403, 404, 405, 422].includes(httpProveedor);
   }
 }
 

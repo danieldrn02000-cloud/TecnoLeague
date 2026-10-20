@@ -12,9 +12,6 @@ export function useEstadoPago(usuarioId: number) {
   const [revision, setRevision] = useState(0);
   const [consultando, setConsultando] = useState(false);
   const [error, setError] = useState("");
-  const [pausado, setPausado] = useState(false);
-  const cuenta = useRef({ id: "", usuarioId, consultas: 0, maximo: 12, ultima: 0 });
-  const enCurso = useRef<{ id: string; usuarioId: number; promesa: Promise<EstadoCheckout> } | null>(null);
   const actual = useRef<EstadoCheckout | null>(null);
   const referenciaActual = useRef<string | null>(null);
   const propietario = useRef(usuarioId);
@@ -34,7 +31,6 @@ export function useEstadoPago(usuarioId: number) {
     setEstado(null);
     setReferencia(null);
     setError("");
-    setPausado(false);
   }, [usuarioId]);
 
   const recibir = useCallback(async (nuevo: EstadoCheckout | null) => {
@@ -43,13 +39,6 @@ export function useEstadoPago(usuarioId: number) {
     if (nuevo && previo?.intentoId === nuevo.intentoId &&
         ((previo.estado === "CONFIRMADO" && nuevo.estado !== "CONFIRMADO") ||
         (intentoTerminado(previo) && !intentoTerminado(nuevo)))) return;
-    // Preparar la reserva y enviar el pago son fases distintas. Un cobro que
-    // acaba de empezar debe poder seguirse aunque la reserva ya agotara su tanda.
-    if (nuevo && previo?.intentoId === nuevo.intentoId && !previo.operacionId && nuevo.operacionId) {
-      cuenta.current.consultas = 0;
-      setPausado(false);
-      setRevision(n => n + 1);
-    }
     actual.current = nuevo;
     referenciaActual.current = nuevo?.intentoId ?? null;
     propietario.current = usuarioId;
@@ -71,66 +60,34 @@ export function useEstadoPago(usuarioId: number) {
     setRevision(n => n + 1);
   }, []);
 
-  const revisar = useCallback(() => {
-    // Solo una acción explícita del usuario abre otra tanda de consultas.
-    cuenta.current.consultas = 0;
-    setPausado(false);
-    setRevision(n => n + 1);
-  }, []);
+  const revisar = useCallback(() => setRevision(n => n + 1), []);
   const terminado = estado ? intentoTerminado(estado) : false;
 
   useEffect(() => {
-    if (!referencia || terminado) {
-      setConsultando(false);
-      setPausado(false);
-      return;
-    }
-    if (cuenta.current.id !== referencia || cuenta.current.usuarioId !== usuarioId) {
-      cuenta.current = { id: referencia, usuarioId, consultas: 0, maximo: 12, ultima: 0 };
-    }
-    const control = cuenta.current;
+    if (!referencia) return;
     let activo = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let consultas = 0;
+    let maxConsultas = 12;
     async function consultar() {
-      const existente = enCurso.current;
-      const misma = existente?.id === referencia && existente.usuarioId === usuarioId;
-      if (control.consultas >= control.maximo && !misma) {
-        if (activo) { setPausado(true); setConsultando(false); }
-        return;
-      }
       setConsultando(true);
-      setPausado(false);
       let continuar = true;
       try {
-        let tarea = misma ? existente : null;
-        if (!tarea) {
-          control.consultas++;
-          control.ultima = Date.now();
-          tarea = {
-            id: referencia!, usuarioId,
-            promesa: graphql<{ estadoIntento: EstadoCheckout }>(CONSULTAR_INTENTO, { id: referencia })
-              .then(data => data.estadoIntento),
-          };
-          enCurso.current = tarea;
-          const limpiar = () => { if (enCurso.current === tarea) enCurso.current = null; };
-          void tarea.promesa.then(limpiar, limpiar);
-        }
-        const nuevo = await tarea.promesa;
+        const data = await graphql<{ estadoIntento: EstadoCheckout }>(CONSULTAR_INTENTO, { id: referencia });
         if (!activo || referenciaActual.current !== referencia) return;
-        await recibir(nuevo);
+        await recibir(data.estadoIntento);
         if (!activo) return;
         setError("");
-        continuar = !intentoTerminado(nuevo);
-        if (nuevo.autenticacion) control.maximo = 120;
+        continuar = !intentoTerminado(data.estadoIntento);
+        if (data.estadoIntento.autenticacion) maxConsultas = 120;
       } catch (e) {
         if (!activo) return;
         setError(e instanceof Error ? e.message : "No pudimos consultar el pago.");
       } finally {
         if (activo) setConsultando(false);
       }
-      if (activo && continuar) {
-        if (control.consultas < control.maximo) timer = setTimeout(() => void consultar(), 5000);
-        else setPausado(true);
+      if (activo && continuar && ++consultas < maxConsultas) {
+        timer = setTimeout(() => void consultar(), 5000);
       }
     }
     void consultar();
@@ -139,20 +96,14 @@ export function useEstadoPago(usuarioId: number) {
 
   useEffect(() => {
     if (!referencia || terminado) return;
-    const actualizar = () => {
-      const control = cuenta.current;
-      if (document.visibilityState === "visible" && !enCurso.current &&
-          control.consultas < control.maximo && Date.now() - control.ultima >= 5000) {
-        setRevision(n => n + 1);
-      }
-    };
+    const actualizar = () => { if (document.visibilityState === "visible") revisar(); };
     window.addEventListener("focus", actualizar);
     document.addEventListener("visibilitychange", actualizar);
     return () => {
       window.removeEventListener("focus", actualizar);
       document.removeEventListener("visibilitychange", actualizar);
     };
-  }, [referencia, terminado]);
+  }, [referencia, terminado, revisar]);
 
   const cancelar = useCallback(async () => {
     if (!referencia) return;
@@ -171,6 +122,6 @@ export function useEstadoPago(usuarioId: number) {
   return {
     estado: propietario.current === usuarioId ? estado : null,
     referencia: propietario.current === usuarioId ? referencia : null,
-    consultando, pausado, error, recibir, recuperar, revisar, cancelar,
+    consultando, error, recibir, recuperar, revisar, cancelar,
   };
 }

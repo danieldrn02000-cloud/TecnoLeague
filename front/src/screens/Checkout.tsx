@@ -171,7 +171,6 @@ export function Checkout({ currentUser, navegar }: {
       {error && <p className="form-error" role="alert">{error}</p>}
       {falloVerificacion && <button type="button" className="text-btn" disabled={verificando} onClick={() => setRevision(n => n + 1)}>Reintentar comprobación</button>}
       {estado && <ResultadoPago estado={estado} ocupado={busy || seguimiento.consultando}
-        pausado={seguimiento.pausado}
         error={seguimiento.error} onConsultar={seguimiento.revisar} onCancelar={() => void seguimiento.cancelar()}
         onNuevaCompra={() => void nuevaCompra()} onPedidos={() => navegar({ tipo: "pedidos" })} />}
       {!estado && !lineas.length && !verificando && !seguimiento.referencia && (

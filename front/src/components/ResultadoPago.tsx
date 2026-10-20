@@ -4,7 +4,6 @@ import { intentoTerminado, puedePagarIntento, type EstadoCheckout } from "../lib
 type Props = {
   estado: EstadoCheckout;
   ocupado?: boolean;
-  pausado?: boolean;
   error?: string;
   onConsultar: () => void;
   onCancelar: () => void;
@@ -12,7 +11,7 @@ type Props = {
   onPedidos: () => void;
 };
 
-export function ResultadoPago({ estado, ocupado, pausado, error, onConsultar, onCancelar, onNuevaCompra, onPedidos }: Props) {
+export function ResultadoPago({ estado, ocupado, error, onConsultar, onCancelar, onNuevaCompra, onPedidos }: Props) {
   const terminado = intentoTerminado(estado);
   const aprobado = estado.estado === "CONFIRMADO";
   const reserva = puedePagarIntento(estado);
@@ -36,7 +35,6 @@ export function ResultadoPago({ estado, ocupado, pausado, error, onConsultar, on
       <p>Total confirmado: {estado.total} {estado.moneda}</p>
       {estado.aviso && <p role="status">{estado.aviso}</p>}
       {error && <p role="alert">{error}</p>}
-      {pausado && !terminado && <p role="status">La consulta automática se ha pausado. Pulsa «Consultar estado» para verificar este mismo pago.</p>}
 
       {!terminado && estado.autenticacion && (
         <div className="autenticacion-pago">

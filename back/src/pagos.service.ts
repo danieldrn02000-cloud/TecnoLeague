@@ -408,9 +408,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         if (rechazado) {
           await this.db.intentoCompra.updateMany({
             where: { id, estado: { in: pendientes } },
-            data: { ultimoError: error.httpProveedor === 402
-              ? "Mercado Pago rechazó el pago. Revisa los datos de la tarjeta y que las credenciales correspondan al mismo entorno."
-              : `No se pudo iniciar el pago. ${error.message}` },
+            data: { ultimoError: `No se pudo iniciar el pago. ${error.message}` },
           });
           return this.consultarIntento(id, usuarioId);
         }
@@ -607,11 +605,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
       include: { detalles: true, operaciones:true, pago: true },
     });
     const operacion = actual.operaciones[0];
-    const rechazoCobro = actual.estado === "RECHAZADO" && operacion?.estadoProveedor === "HTTP_402";
-    const solicitudRechazada = actual.estado === "RECHAZADO" && !!operacion?.estadoProveedor?.startsWith("HTTP_") && !rechazoCobro;
-    if (!aviso && rechazoCobro) {
-      aviso = actual.ultimoError ?? "Mercado Pago rechazó el pago. Conservamos tu carrito.";
-    } else if (!aviso && solicitudRechazada) {
+    const solicitudRechazada = actual.estado === "RECHAZADO" && !!operacion?.estadoProveedor?.startsWith("HTTP_");
+    if (!aviso && solicitudRechazada) {
       aviso = actual.ultimoError ?? "No se pudo iniciar el pago. Revisa la configuración de Mercado Pago.";
     } else if (!aviso && pendientes.includes(actual.estado) && operacion && !actual.pago?.idOrdenExterna) {
       aviso = operacion.estado === "ENVIADA"
