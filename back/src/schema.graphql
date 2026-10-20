@@ -315,7 +315,9 @@ type EstadoCheckout {
   total: String!
   moneda: String!
   operacionId: ID
-  estadoOperacion: String
+  estadoOperacion: EstadoOperacionCobro
+  modalidad: ModalidadCheckout!
+  autenticacion: AutenticacionPago
   renglones: [RenglonIntento!]!
 }
 type InicioPago {
@@ -336,10 +338,14 @@ extend type Mutation {
 }
 
 enum TipoTarjetaMP { credit_card debit_card }
+enum ModalidadCheckout {REDIRECCION ORDERS_API}
+enum EstadoOperacionCobro {ENVIADA INCIERTA VINCULADA FINALIZADA}
+
 input IdentificacionPagoInput {
   tipo: String!
   numero: String!
 }
+
 input DatosPagoInput {
   claveOperacion: ID!
   token: String!

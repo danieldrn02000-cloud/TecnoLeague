@@ -28,14 +28,14 @@ export interface CredencialesInput {
   password: string;
 }
 
-export interface DatosPagoInput{
+export interface DatosPagoInput {
   claveOperacion: string;
   token: string;
   metodoPagoId: string;
   tipoMetodoPago: "credit_card" | "debit_card";
   cuotas: number;
-  email:string;
-  identificacion?:{tipo: string;
+  email: string;
+  identificacion?:{ tipo: string;
     numero:string
   } | null;
 }
