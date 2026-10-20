@@ -7,7 +7,8 @@ vi.mock("../lib/mercadoPago", () => ({ obtenerMercadoPago: vi.fn() }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 function sdkSimulado() {
-  const listeners = new Map<string, Map<string, (event: { bin?: string | null }) => void>>();
+  type Evento = { bin?: string | null; field?: string; errorMessages?: { cause?: string; message?: string }[] };
+  const listeners = new Map<string, Map<string, (event: Evento) => void>>();
   const unmount = vi.fn();
   const createCardToken = vi.fn(async () => ({ id: "token-efimero" }));
   const getPaymentMethods = vi.fn(async (): Promise<{ results: MetodoTarjeta[] }> => ({ results: [{ id: "visa", name: "Visa", payment_type_id: "debit_card" }] }));
@@ -16,7 +17,7 @@ function sdkSimulado() {
   vi.mocked(obtenerMercadoPago).mockResolvedValue({
     fields: {
       create: tipo => {
-        const eventos = new Map<string, (event: { bin?: string | null }) => void>();
+        const eventos = new Map<string, (event: Evento) => void>();
         listeners.set(tipo, eventos);
         const campo: CampoSeguro = {
           on: (evento, callback) => { eventos.set(evento, callback); },
@@ -71,7 +72,51 @@ it("descarta consultas atrasadas del BIN y conserva las cuotas de la tarjeta vig
   await act(async () => anterior({ results: [{ id: "visa", name: "Visa", payment_type_id: "debit_card" }] }));
   expect(sdk.getInstallments).toHaveBeenCalledExactlyOnceWith({ amount: "99.00", bin: "55555555" });
   fireEvent.change(screen.getByLabelText("Titular"), { target: { value: "APRO" } });
-  fireEvent.change(screen.getByLabelText("Cuotas"), { target: { value: "3" } });
+  fireEvent.change(screen.getByLabelText("Número de pagos"), { target: { value: "3" } });
   fireEvent.submit(boton.closest("form")!);
   await waitFor(() => expect(onToken).toHaveBeenCalledExactlyOnceWith({ token: "token-efimero", paymentMethodId: "master", paymentTypeId: "credit_card", installments: "3" }));
+});
+
+it("explica un vencimiento inválido y permite pagar al corregirlo sin leer la tarjeta", async () => {
+  const sdk = sdkSimulado();
+  const onToken = vi.fn(async () => {});
+  render(<FormularioTarjeta importe="99.00" onToken={onToken} />);
+  await waitFor(() => expect(sdk.listeners.size).toBe(3));
+  await act(async () => { sdk.listeners.get("cardNumber")!.get("binChange")!({ bin: "41111111" }); });
+  const boton = screen.getByRole("button", { name: "Pagar $99.00 MXN" }) as HTMLButtonElement;
+  await waitFor(() => expect(boton.disabled).toBe(false));
+  await act(async () => { sdk.listeners.get("expirationDate")!.get("validityChange")!({
+    errorMessages: [{ cause: "invalid_value", message: "expirationYear invalid_value secreto" }],
+  }); });
+  expect(screen.getByRole("alert").textContent).toMatch(/fecha válida y una tarjeta vigente/);
+  expect(screen.queryByText(/expirationYear|secreto/)).toBeNull();
+  expect(boton.disabled).toBe(true);
+  fireEvent.submit(boton.closest("form")!);
+  expect(onToken).not.toHaveBeenCalled();
+  await act(async () => { sdk.listeners.get("expirationDate")!.get("validityChange")!({ errorMessages: [] }); });
+  expect(boton.disabled).toBe(false);
+  fireEvent.change(screen.getByLabelText("Titular"), { target: { value: "APRO" } });
+  fireEvent.submit(boton.closest("form")!);
+  await waitFor(() => expect(onToken).toHaveBeenCalledTimes(1));
+});
+
+it("traduce errores del código de seguridad y no envía el pago", async () => {
+  const sdk = sdkSimulado();
+  sdk.createCardToken.mockRejectedValue([{ code: "E302", message: "internal token secreto" }]);
+  const onToken = vi.fn(async () => {});
+  render(<FormularioTarjeta importe="99.00" onToken={onToken} />);
+  await waitFor(() => expect(sdk.listeners.size).toBe(3));
+  await act(async () => { sdk.listeners.get("cardNumber")!.get("binChange")!({ bin: "41111111" }); });
+  fireEvent.change(screen.getByLabelText("Titular"), { target: { value: "APRO" } });
+  fireEvent.submit(screen.getByRole("button", { name: "Pagar $99.00 MXN" }).closest("form")!);
+  await screen.findByText("Revisa el código de seguridad de tu tarjeta.");
+  expect(screen.queryByText(/E302|internal|secreto/)).toBeNull();
+  expect(onToken).not.toHaveBeenCalled();
+});
+
+it("no muestra variables ni archivos de configuración al fallar la carga", async () => {
+  vi.mocked(obtenerMercadoPago).mockRejectedValueOnce(new Error("Falta PUBLIC_MP_PUBLIC_KEY en front/.env"));
+  render(<FormularioTarjeta importe="99.00" onToken={vi.fn()} />);
+  await screen.findByText(/No pudimos cargar el formulario de pago/);
+  expect(screen.queryByText(/PUBLIC_MP|\.env/)).toBeNull();
 });

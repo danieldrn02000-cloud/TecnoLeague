@@ -131,6 +131,19 @@ reales ni disponibilidad de la cuenta de Mercado Pago.
 
 ## Resultado y autenticación bancaria (etapa 4)
 
+Los motivos conocidos del rechazo se traducen a mensajes propios en español:
+fondos insuficientes, tarjeta vencida, vencimiento/número/código de seguridad
+incorrectos, tarjeta inhabilitada, autorización bancaria y verificación fallida.
+Se prioriza el detalle del pago rechazado dentro de la orden y se conserva el
+mensaje para consultas posteriores. Los rechazos HTTP también extraen motivos
+conocidos de `errors`/`cause`/`details`. Si no hay un motivo reconocido, se muestra
+un rechazo general, sin atribuirlo a saldo o vencimiento sin evidencia.
+
+Los campos seguros escuchan `validityChange` y muestran avisos de validación en
+español. Un campo inválido bloquea el envío hasta corregirse; el número completo,
+CVV y vencimiento permanecen en los iframes de Mercado Pago. Los mensajes libres
+del SDK y los detalles internos de configuración no se presentan al comprador.
+
 `ResultadoPago.tsx` muestra el resultado y la acción bancaria. `use-estado-pago.ts`
 comparte consultas acotadas, recuperación al volver a la pestaña, cancelación y
 actualización idempotente del carrito entre checkout y retorno.

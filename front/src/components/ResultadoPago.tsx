@@ -22,7 +22,7 @@ export function ResultadoPago({ estado, ocupado, pausado, error, onConsultar, on
     CONFIRMADO: "Pago aprobado",
     RECHAZADO: estado.solicitudRechazada ? "No se pudo iniciar el pago" : "Pago rechazado",
     CANCELADO: "Pago cancelado",
-    EXPIRADO: "La reserva venció",
+    EXPIRADO: "El tiempo para pagar terminó",
   };
   return (
     <section className="resultado-pago panel" aria-label="Resultado del pago">
@@ -30,13 +30,13 @@ export function ResultadoPago({ estado, ocupado, pausado, error, onConsultar, on
       <p>
         {aprobado ? `Tu pedido #${estado.pedidoId} está pagado.`
           : terminado ? "Conservamos tu carrito. Puedes preparar una nueva compra."
-          : reserva ? "Completa el formulario de tarjeta para pagar el total confirmado."
-          : "No inicies otro pago mientras comprobamos esta operación."}
+          : reserva ? "Completa los datos de tu tarjeta para pagar."
+          : "Espera la confirmación antes de volver a pagar."}
       </p>
-      <p>Total confirmado: {estado.total} {estado.moneda}</p>
+      <p>Total: ${estado.total} {estado.moneda}</p>
       {estado.aviso && <p role="status">{estado.aviso}</p>}
       {error && <p role="alert">{error}</p>}
-      {pausado && !terminado && <p role="status">La consulta automática se ha pausado. Pulsa «Consultar estado» para verificar este mismo pago.</p>}
+      {pausado && !terminado && <p role="status">Tu pago sigue pendiente. Pulsa «Consultar estado» para buscar una actualización.</p>}
 
       {!terminado && estado.autenticacion && (
         <div className="autenticacion-pago">
@@ -50,7 +50,7 @@ export function ResultadoPago({ estado, ocupado, pausado, error, onConsultar, on
           <p>
             Si la verificación no aparece, puedes{" "}
             <a href={estado.autenticacion.url} target="_blank" rel="noopener noreferrer">
-              abrir la autenticación del banco en otra pestaña
+              abrir la verificación del banco en otra pestaña
             </a> y después consultar el pago aquí.
           </p>
         </div>
@@ -66,7 +66,7 @@ export function ResultadoPago({ estado, ocupado, pausado, error, onConsultar, on
         )}
         {!terminado && !estado.autenticacion && (
           <button type="button" className="text-btn" disabled={ocupado} onClick={onCancelar}>
-            Cancelar intento
+            Cancelar compra
           </button>
         )}
         {!terminado && estado.modalidad === "REDIRECCION" && estado.checkoutUrl && (

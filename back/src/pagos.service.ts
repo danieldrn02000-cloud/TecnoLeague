@@ -12,6 +12,7 @@ import { PrismaService } from "./prisma.service";
 import { fallo } from "./tienda.service";
 import type {DatosPagoInput, PedidoInput} from "./types"
 import { ErrorOrdersMP, MercadoPagoOrdersService, type OrdenMP } from "./mercadopago-orders.service";
+import { mensajeRechazoPago } from "./mensajes-pago";
 
 type RecursoMP = {
   id?: string | number;
@@ -408,9 +409,9 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         if (rechazado) {
           await this.db.intentoCompra.updateMany({
             where: { id, estado: { in: pendientes } },
-            data: { ultimoError: error.httpProveedor === 402
-              ? "Mercado Pago rechazó el pago. Revisa los datos de la tarjeta y que las credenciales correspondan al mismo entorno."
-              : `No se pudo iniciar el pago. ${error.message}` },
+            data: { ultimoError: error.httpProveedor === 402 || error.diagnostico.motivoTarjeta
+              ? mensajeRechazoPago([error.diagnostico.motivoTarjeta, ...(error.diagnostico.causas ?? []), error.diagnostico.codigo])
+              : "No pudimos procesar el pago. Inténtalo de nuevo en unos momentos." },
           });
           return this.consultarIntento(id, usuarioId);
         }
@@ -630,7 +631,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         autenticacion = (await this.conciliar(id)).autenticacion;
       } catch (error) {
         aviso =
-          "No pudimos verificar el pago todavía. Conservamos el carrito; vuelve a consultar este intento.";
+          "Todavía no pudimos confirmar tu pago. Conservamos tu carrito; consulta de nuevo en unos momentos.";
         await this.registrarFallo(id, error);
       }
     }
@@ -641,14 +642,14 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     const operacion = actual.operaciones[0];
     const rechazoCobro = actual.estado === "RECHAZADO" && operacion?.estadoProveedor === "HTTP_402";
     const solicitudRechazada = actual.estado === "RECHAZADO" && !!operacion?.estadoProveedor?.startsWith("HTTP_") && !rechazoCobro;
-    if (!aviso && rechazoCobro) {
-      aviso = actual.ultimoError ?? "Mercado Pago rechazó el pago. Conservamos tu carrito.";
+    if (!aviso && actual.estado === "RECHAZADO" && !solicitudRechazada) {
+      aviso = mensajeRechazoPago([actual.ultimoError, actual.pago?.estadoProveedor?.split(":")[1]]);
     } else if (!aviso && solicitudRechazada) {
-      aviso = actual.ultimoError ?? "No se pudo iniciar el pago. Revisa la configuración de Mercado Pago.";
+      aviso = mensajeRechazoPago([actual.ultimoError], "No pudimos procesar el pago. Inténtalo de nuevo en unos momentos.");
     } else if (!aviso && pendientes.includes(actual.estado) && operacion && !actual.pago?.idOrdenExterna) {
       aviso = operacion.estado === "ENVIADA"
-        ? "Estamos esperando la respuesta del pago. No inicies otro cobro."
-        : "Aún no conocemos el resultado. Conservamos el intento y lo verificaremos sin crear otro cobro.";
+        ? "Estamos esperando la respuesta de tu pago. Evita volver a pagar mientras lo confirmamos."
+        : "Tu pago aún no está confirmado. Conservamos tu carrito; consulta de nuevo en unos momentos.";
     }
     return {
       intentoId: id,
@@ -1021,7 +1022,11 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
                 : "CANCELADO";
           await tx.intentoCompra.update({
             where: { id },
-            data: { estado, reservaActiva: false, ultimoError: null },
+            data: { estado, reservaActiva: false, ultimoError: estado === "RECHAZADO"
+              ? mensajeRechazoPago([
+                ...(orden.transactions?.payments ?? []).filter(p => p.status === "failed").map(p => p.status_detail),
+                orden.status_detail,
+              ]) : null },
           });
           await tx.pago.update({
             where: { id: pago.id },

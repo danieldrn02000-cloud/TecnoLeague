@@ -152,7 +152,7 @@ describe("Checkout dentro del sitio", () => {
   it("distingue una solicitud inválida de un rechazo bancario", async () => {
     procesar = async id => estado(id, {
       estado: "RECHAZADO", solicitudRechazada: true, operacionId: "op", estadoOperacion: "FINALIZADA",
-      aviso: "No se pudo iniciar el pago. Mercado Pago respondió HTTP 400.",
+      aviso: "No pudimos procesar el pago. Inténtalo de nuevo en unos momentos.",
     });
     abrir(); await preparar();
     fireEvent.click(screen.getByRole("button", { name: "Pagar 99.00" }));
@@ -173,7 +173,7 @@ describe("Checkout dentro del sitio", () => {
     expect(preparacion[1]?.datos).toMatchObject({ email: usuario.email });
     expect(api.mock.calls.some(([q]) => q === PROCESAR_PAGO)).toBe(false);
     expect(window.location.href).toBe(url);
-    expect(screen.getAllByText(/Total confirmado:/)[0].textContent).toContain(
+    expect(screen.getAllByText(/Total:/)[0].textContent).toContain(
       "99.00",
     );
   });
@@ -230,7 +230,7 @@ describe("Checkout dentro del sitio", () => {
     abrir();
     await preparar();
     fireEvent.click(screen.getByRole("button", { name: "Pagar 99.00" }));
-    await screen.findByText(/No pudimos confirmar la respuesta/);
+    await screen.findByText(/Todavía no pudimos confirmar tu pago/);
     await screen.findByRole("heading", { name: "Estamos verificando tu pago" });
     window.dispatchEvent(new Event("pagehide"));
     expect(sessionStorage.getItem("tl-pantalla-pendiente")).toBe("checkout");

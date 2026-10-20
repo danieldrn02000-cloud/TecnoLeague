@@ -108,6 +108,23 @@ test("Orders HTTP: el diagnóstico conserva códigos y descarta datos sensibles"
   });
 });
 
+test("Orders HTTP: extrae el motivo de tarjeta de un 402 sin conservar mensajes libres", async (t) => {
+  const anterior = process.env.MP_ACCESS_TOKEN;
+  process.env.MP_ACCESS_TOKEN = "token-simulado";
+  t.after(() => {
+    if (anterior === undefined) delete process.env.MP_ACCESS_TOKEN;
+    else process.env.MP_ACCESS_TOKEN = anterior;
+  });
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({
+    errors: [{ code: "failed", details: [{ code: "insufficient_amount", message: "token secreto@example.test" }] }],
+  }), { status: 402 }));
+  await assert.rejects(new MercadoPagoOrdersService().consultarOrden("ORD1"), error => {
+    assert.equal(error.diagnostico.motivoTarjeta, "insufficient_amount");
+    assert.ok(!JSON.stringify(error).includes("secreto@example.test"));
+    return true;
+  });
+});
+
 test("Orders HTTP: interpreta errors y rutas del campo sin exponer mensajes ni valores", async (t) => {
   const anterior = process.env.MP_ACCESS_TOKEN;
   process.env.MP_ACCESS_TOKEN = "token-simulado";
@@ -537,7 +554,8 @@ test("Orders y reservas sobre PostgreSQL real", {
     const result = await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
     assert.equal(result.estado, "RECHAZADO");
     assert.equal(result.solicitudRechazada, true);
-    assert.match(result.aviso, /No se pudo iniciar el pago.*HTTP 400/);
+    assert.match(result.aviso, /No pudimos procesar el pago/);
+    assert.ok(!result.aviso.includes("HTTP"));
     assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.producto.id } })).stock, 10);
   });
 
@@ -552,7 +570,7 @@ test("Orders y reservas sobre PostgreSQL real", {
     const result = await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
     assert.equal(result.estado, "RECHAZADO");
     assert.equal(result.solicitudRechazada, false);
-    assert.match(result.aviso, /Mercado Pago rechazó el pago/);
+    assert.match(result.aviso, /No se pudo aprobar el pago/);
     await f.servicio.consultarIntento(f.compra.claveSolicitud, f.usuario.id);
     await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
     assert.equal(llamadas, 1);
@@ -591,6 +609,48 @@ test("Orders y reservas sobre PostgreSQL real", {
     const resultado = await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
     await assert.rejects(f.servicio.cerrarRechazoInicial402(f.compra.claveSolicitud, resultado.operacionId), /ya tiene una orden o pedido/);
     assert.equal((await f.servicio.consultarIntento(f.compra.claveSolicitud, f.usuario.id)).estado, "CONFIRMADO");
+  });
+
+  for (const [motivo, esperado] of [
+    ["cc_rejected_insufficient_amount", /fondos suficientes/],
+    ["expired_card", /tarjeta está vencida/],
+    ["cc_rejected_bad_filled_date", /fecha de vencimiento/],
+    ["cc_rejected_bad_filled_security_code", /código de seguridad/],
+    ["3ds_challenge_failed", /verificación de tu banco/],
+    ["codigo_desconocido", /No se pudo aprobar el pago/],
+  ]) await t.test(`rechazo ${motivo}: mensaje claro y persistente sin datos técnicos`, async st => {
+    const f = await fixture(st);
+    const crear = f.proveedor.crearYProcesarOrden;
+    f.proveedor.crearYProcesarOrden = async datos => Object.assign(await crear(datos), {
+      status: "failed", status_detail: "failed", total_paid_amount: "0.00",
+      transactions: { payments: [{ status: "failed", status_detail: motivo }] },
+    });
+    await f.servicio.prepararCompra(f.compra, f.usuario.id);
+    const resultado = await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
+    assert.equal(resultado.estado, "RECHAZADO");
+    assert.match(resultado.aviso, esperado);
+    assert.ok(!resultado.aviso.includes(motivo));
+    const recargado = await f.servicio.consultarIntento(f.compra.claveSolicitud, f.usuario.id);
+    assert.equal(recargado.aviso, resultado.aviso);
+    assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.producto.id } })).stock, 10);
+    assert.equal(await db.pedido.count({ where: { usuarioId: f.usuario.id } }), 0);
+  });
+
+  await t.test("el rechazo HTTP 402 conserva el motivo y oculta detalles internos antiguos", async st => {
+    const f = await fixture(st);
+    f.proveedor.crearYProcesarOrden = async () => { throw new ErrorOrdersMP(402, {
+      codigo: "failed", motivoTarjeta: "insufficient_amount",
+    }); };
+    await f.servicio.prepararCompra(f.compra, f.usuario.id);
+    const resultado = await f.servicio.procesarPago(f.compra.claveSolicitud, f.pago, f.usuario.id);
+    assert.match(resultado.aviso, /fondos suficientes/);
+    await db.intentoCompra.update({ where: { id: f.compra.claveSolicitud }, data: {
+      ultimoError: "Mercado Pago respondió HTTP 402. MP_ACCESS_TOKEN front/.env secreto",
+    } });
+    const antiguo = await f.servicio.consultarIntento(f.compra.claveSolicitud, f.usuario.id);
+    assert.match(antiguo.aviso, /No se pudo aprobar el pago/);
+    assert.ok(!antiguo.aviso.includes("HTTP"));
+    assert.ok(!antiguo.aviso.includes("secreto"));
   });
 
   await t.test("REDIRECCION conserva la conciliación de órdenes anteriores", async (st) => {

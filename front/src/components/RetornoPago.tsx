@@ -40,7 +40,7 @@ export function RetornoPago({
       ) : (
         <section className="resultado-pago panel">
           <h1>Consultar el pago</h1>
-          <p role="status">Estamos verificando el intento de compra.</p>
+          <p role="status">Estamos consultando el resultado de tu pago.</p>
           {seguimiento.error && <p role="alert">{seguimiento.error}</p>}
           <button
             type="button"
