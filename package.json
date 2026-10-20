@@ -20,7 +20,7 @@
     "db:studio": "npm run db:studio -w back",
     "test:api": "node scripts/test-api.mjs",
     "test:subscriptions": "npm run build -w back && node --test back/test/*.test.cjs",
-    "test:checkout": "node --test scripts/test-checkout-recuperacion.cjs && npm run test -w front -- src/screens/Checkout.test.tsx src/components/tarjeta.test.tsx",
+    "test:checkout": "node --test scripts/test-checkout-recuperacion.cjs && npm run test -w front -- src/screens/Checkout.test.tsx src/components/tarjeta.test.tsx src/components/RetornoPago.test.tsx",
     "test:orders": "npm run build -w back && node --test back/test/orders-api.test.cjs",
     "test:front": "npm run test -w front"
   },

@@ -216,6 +216,11 @@ enum EstadoOperacionCobro{
   FINALIZADA
 }
 
+enum ModoCapturaOrders {
+  automatic
+  automatic_async
+}
+
 model IntentoCompra {
   id String @id @default(uuid())
   usuarioId Int @map("usuario_id")

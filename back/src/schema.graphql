@@ -319,9 +319,6 @@ type EstadoCheckout {
   estadoOperacion: EstadoOperacionCobro
   modalidad: ModalidadCheckout!
   autenticacion: AutenticacionPago
-  estadoOperacion: EstadoOperacionCobro
-  modalidad: ModalidadCheckout!
-  autenticacion: AutenticacionPago
   renglones: [RenglonIntento!]!
 }
 type InicioPago {
