@@ -3,7 +3,7 @@
 El backend expone dos operaciones autenticadas. `prepararCompra` reserva stock
 y devuelve el total calculado desde PostgreSQL; no llama a Mercado Pago.
 `procesarPago` cobra ese total con un token generado por MercadoPago.js.
-El frontend prepara la compra, inicializa CardForm con el total del servidor,
+El frontend prepara la compra, inicializa los campos seguros de MercadoPago.js con el total del servidor,
 envía el token a `procesarPago` y muestra el resultado dentro de TecnoLeague.
 La validación de una tarjeta por sí sola no cobra ni crea un pedido.
 
@@ -60,6 +60,11 @@ mutation Cobrar($id: ID!, $pago: DatosPagoInput!) {
    `email` e `identificacion` opcional. Obtener el tipo real del método mediante
    el SDK; no asumir que todas las tarjetas son de crédito. Débito admite una
    cuota en esta implementación. No enviar un importe.
+   La interfaz usa el correo de la cuenta autenticada para preparación y pago;
+   no pide correo ni documento al comprador. En el flujo mexicano se omite la
+   identificación. El backend conserva el campo opcional por compatibilidad.
+   La tokenización usa `fields.createCardToken({ cardholderName })` con número,
+   vencimiento y CVV capturados en iframes del SDK, sin campos ocultos ficticios.
 4. Mostrar el resultado confirmado por el servidor. `EN_PROCESO` no significa
    compra aprobada. Consultar `estadoIntento` para recuperar el resultado.
 
@@ -128,7 +133,7 @@ su cierre ni su carga aprueban la compra: siempre se consulta el backend.
 
 Referencias de contrato: [Orders del SDK oficial de Node](https://github.com/mercadopago/sdk-nodejs/blob/master/src/clients/order/create/types.ts),
 [respuesta de Orders](https://github.com/mercadopago/sdk-nodejs/blob/master/src/clients/order/commonTypes.ts),
-[CardForm del SDK oficial](https://github.com/mercadopago/sdk-js/blob/master/docs/card-form.md).
+[campos seguros del SDK oficial](https://github.com/mercadopago/sdk-js/blob/master/docs/fields.md).
 La disponibilidad de captura asíncrona/3DS y la presentación del desafío deben
 verificarse con la cuenta de México y una tarjeta de pruebas compatible.
 Las pruebas simuladas no establecen disponibilidad ni acreditación real.

@@ -76,7 +76,7 @@ export function Checkout({ currentUser, navegar }: {
     const form = new FormData(e.currentTarget);
     const datos = {
       nombre: String(form.get("nombre")).trim(),
-      email: String(form.get("email")).trim(),
+      email: currentUser.email,
       direccion: [
         `${String(form.get("calle")).trim()} ${String(form.get("numeroExterior")).trim()}`,
         String(form.get("colonia")).trim(), String(form.get("ciudad")).trim(),
@@ -135,10 +135,7 @@ export function Checkout({ currentUser, navegar }: {
           metodoPagoId: tarjeta.paymentMethodId,
           tipoMetodoPago: tarjeta.paymentTypeId,
           cuotas: Number(tarjeta.installments),
-          email: tarjeta.cardholderEmail,
-          ...(tarjeta.identificationType && tarjeta.identificationNumber ? {
-            identificacion: { tipo: tarjeta.identificationType, numero: tarjeta.identificationNumber },
-          } : {}),
+          email: currentUser.email,
         },
       });
       await recibir(data.procesarPago);
@@ -195,18 +192,6 @@ export function Checkout({ currentUser, navegar }: {
                 maxLength={120}
                 defaultValue={currentUser.nombre}
                 placeholder="Ej. Daniel Durán"
-              />
-            </label>
-            <label>
-              Correo electrónico
-              <input
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                maxLength={150}
-                defaultValue={currentUser.email}
-                placeholder="daniel@ejemplo.test"
               />
             </label>
             <label>

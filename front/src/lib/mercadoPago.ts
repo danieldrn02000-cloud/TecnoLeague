@@ -1,56 +1,35 @@
-//Este archivo carga una sola vez MercadoPago.njs desde la url del sdk
-//Lo inicializa con la public key
-export type DatosTarjeta = {
+// Campos seguros del SDK oficial: la tarjeta completa nunca pasa por React.
+export type TarjetaTokenizada = {
   token: string;
   paymentMethodId: string;
-  issuerId: string;
-  installments: string;
-  cardholderEmail: string;
-  identificationType: string;
-  identificationNumber: string;
-};
-export type TarjetaTokenizada = DatosTarjeta & {
   paymentTypeId: "credit_card" | "debit_card";
+  installments: string;
 };
-
-type Campo = {
-  id: string;
-  placeholder?: string;
-};
-
-type ConfiguracionCardForm = {
-  amount: string;
-  iframe: boolean;
-  form: {
-    id: string;
-    cardNumber: Campo;
-    expirationDate: Campo;
-    securityCode: Campo;
-    cardholderName: Campo;
-    issuer: Campo;
-    installments: Campo;
-    identificationType: Campo;
-    identificationNumber: Campo;
-    cardholderEmail: Campo;
-  };
-  callbacks: {
-    onFormMounted: (error?: unknown) => void;
-    onSubmit: (event: Event) => void;
-    onPaymentMethodsReceived?: (error?: unknown, data?: {
-      results: { id: string; payment_type_id: string }[];
-    }) => void;
-    onBinChange?: () => void;
-    onError?: (error?: unknown) => void;
-  };
-};
-
-export type InstanciaCardForm = {
-  getCardFormData(): DatosTarjeta;
+export type CampoSeguro = {
+  mount(contenedor: string): CampoSeguro;
   unmount(): void;
+  on(evento: string, callback: (datos: { bin?: string | null }) => void): void;
+  update(propiedades: { settings: { length?: number; validation?: string; mode?: string } }): void;
 };
-
-type InstanciaMercadoPago = {
-  cardForm(config: ConfiguracionCardForm): InstanciaCardForm;
+export type MetodoTarjeta = {
+  id: string;
+  name: string;
+  payment_type_id: string;
+  settings?: { card_number?: { length: number; validation: string }; security_code?: { length: number; mode: string } }[];
+};
+export type PlanCuotas = {
+  payment_method_id?: string;
+  issuer?: { id: string | number };
+  payer_costs: { installments: number; recommended_message: string }[];
+};
+export type InstanciaMercadoPago = {
+  fields: {
+    create(tipo: "cardNumber" | "expirationDate" | "securityCode", opciones: { placeholder: string }): CampoSeguro;
+    createCardToken(datos: { cardholderName: string }): Promise<{ id: string } | undefined>;
+  };
+  getPaymentMethods(datos: { bin: string }): Promise<{ results: MetodoTarjeta[] }>;
+  getIssuers(datos: { paymentMethodId: string; bin: string }): Promise<{ id: string | number; name: string }[]>;
+  getInstallments(datos: { amount: string; bin: string }): Promise<PlanCuotas[]>;
 };
 
 type ConstructorMercadoPago = new (

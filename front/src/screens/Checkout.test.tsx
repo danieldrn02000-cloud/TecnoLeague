@@ -52,7 +52,7 @@ vi.mock("../components/tarjeta", () => ({
           paymentMethodId: "visa",
           paymentTypeId: "debit_card",
           installments: "1",
-          cardholderEmail: "comprador@example.test",
+          cardholderEmail: "otro@example.test",
           identificationType: "",
           identificationNumber: "",
         })
@@ -152,11 +152,14 @@ describe("Checkout dentro del sitio", () => {
   it("prepara antes de tokenizar y utiliza el total del servidor", async () => {
     const url = window.location.href;
     abrir();
+    expect(screen.queryByLabelText(/Correo electrónico/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /Pagar 99/ })).toBeNull();
     await preparar();
     expect(api.mock.calls.filter(([q]) => q === PREPARAR_COMPRA)).toHaveLength(
       1,
     );
+    const preparacion = api.mock.calls.find(([q]) => q === PREPARAR_COMPRA)!;
+    expect(preparacion[1]?.datos).toMatchObject({ email: usuario.email });
     expect(api.mock.calls.some(([q]) => q === PROCESAR_PAGO)).toBe(false);
     expect(window.location.href).toBe(url);
     expect(screen.getAllByText(/Total confirmado:/)[0].textContent).toContain(
@@ -174,8 +177,10 @@ describe("Checkout dentro del sitio", () => {
     expect(llamada[1]?.pago).toMatchObject({
       tipoMetodoPago: "debit_card",
       cuotas: 1,
+      email: usuario.email,
     });
     expect(llamada[1]?.pago).not.toHaveProperty("total");
+    expect(llamada[1]?.pago).not.toHaveProperty("identificacion");
     expect(JSON.parse(localStorage.getItem("tl-carrito-v1")!)[0].cantidad).toBe(
       1,
     );
