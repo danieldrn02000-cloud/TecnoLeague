@@ -246,7 +246,7 @@ export class MercadoPagoOrdersService {
       country_code: typeof orden.country_code === "string" ? orden.country_code : undefined,
       user_id: typeof orden.user_id === "string" || typeof orden.user_id === "number" ? orden.user_id : undefined,
       last_updated_date: typeof orden.last_updated_date === "string" ? orden.last_updated_date : undefined,
-      transactions: this.extraerAutenticacion(orden.transactions),
+      transactions: this.extraerTransacciones(orden.transactions),
     };
   }
 
@@ -304,14 +304,19 @@ export class MercadoPagoOrdersService {
     };
   }
 
-  private extraerAutenticacion(valor: unknown): OrdenMP["transactions"] {
+  private extraerTransacciones(valor: unknown): OrdenMP["transactions"] {
     if (!valor || typeof valor !== "object" || !("payments" in valor) || !Array.isArray(valor.payments)) return;
     return { payments: valor.payments.map((p: unknown) => {
-      if (!p || typeof p !== "object" || !("payment_method" in p)) return {};
-      const metodo = p.payment_method;
-      if (!metodo || typeof metodo !== "object") return {};
+      if (!p || typeof p !== "object") return {};
+      const codigo = (v: unknown) => typeof v === "string" && /^[A-Za-z0-9_.-]{1,100}$/.test(v) ? v : undefined;
+      const estado = {
+        status: codigo("status" in p ? p.status : undefined),
+        status_detail: codigo("status_detail" in p ? p.status_detail : undefined),
+      };
+      const metodo = "payment_method" in p ? p.payment_method : null;
+      if (!metodo || typeof metodo !== "object") return estado;
       const seguridad = "transaction_security" in metodo ? metodo.transaction_security : null;
-      return { payment_method: {
+      return { ...estado, payment_method: {
         redirect_url: "redirect_url" in metodo && typeof metodo.redirect_url === "string" ? metodo.redirect_url : undefined,
         transaction_security: seguridad && typeof seguridad === "object" ? {
         url: "url" in seguridad && typeof seguridad.url === "string" ? seguridad.url : undefined,

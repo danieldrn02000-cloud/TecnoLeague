@@ -809,6 +809,9 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
           this.logger.log(JSON.stringify({
             intentoId: id, ordenId: pago.idOrdenExterna, resultado: "ORDEN_MP_VERIFICADA",
             estado: codigo(orden.status), detalle: codigo(orden.status_detail),
+            transacciones: orden.transactions?.payments?.slice(0, 10).map(transaccion => ({
+              estado: codigo(transaccion.status), detalle: codigo(transaccion.status_detail),
+            })),
           }));
         }
         if (intento.modalidad === "ORDERS_API") {

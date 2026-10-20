@@ -115,6 +115,29 @@ test("Orders HTTP: interpreta errors y rutas del campo sin exponer mensajes ni v
   });
 });
 
+test("Orders HTTP: conserva el motivo de rechazo sin requerir payment_method ni exponer valores", async (t) => {
+  const anterior = process.env.MP_ACCESS_TOKEN;
+  process.env.MP_ACCESS_TOKEN = "token-simulado";
+  t.after(() => {
+    if (anterior === undefined) delete process.env.MP_ACCESS_TOKEN;
+    else process.env.MP_ACCESS_TOKEN = anterior;
+  });
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({
+    id: "ORD-RECHAZADA", status: "failed", status_detail: "failed",
+    transactions: { payments: [
+      { status: "failed", status_detail: "cc_rejected_3ds_challenge", token: "secreto" },
+      { status: "failed", status_detail: "correo@privado.test", message: "dato-sensible" },
+    ] },
+  })));
+  const orden = await new MercadoPagoOrdersService().consultarOrden("ORD-RECHAZADA");
+  assert.deepEqual(orden.transactions.payments, [
+    { status: "failed", status_detail: "cc_rejected_3ds_challenge" },
+    { status: "failed", status_detail: undefined },
+  ]);
+  assert.ok(!JSON.stringify(orden).includes("secreto"));
+  assert.ok(!JSON.stringify(orden).includes("privado"));
+});
+
 test("Orders HTTP: captura asíncrona conserva solo la acción 3DS", async (t) => {
   const anterior = process.env.MP_ACCESS_TOKEN;
   process.env.MP_ACCESS_TOKEN = "token-simulado";
@@ -319,6 +342,7 @@ test("Orders y reservas sobre PostgreSQL real", {
     f.proveedor.crearYProcesarOrden = async datos => {
       const orden = await crear(datos);
       Object.assign(orden, { status: "failed", status_detail: "rejected", total_paid_amount: "0.00" });
+      orden.transactions = { payments: [{ status: "failed", status_detail: "cc_rejected_3ds_challenge" }] };
       return orden;
     };
     await f.servicio.prepararCompra(f.compra, f.usuario.id);
@@ -326,6 +350,8 @@ test("Orders y reservas sobre PostgreSQL real", {
     assert.equal(result.estado, "RECHAZADO");
     assert.equal(result.solicitudRechazada, false);
     assert.ok(eventos.some(e => e.resultado === "ORDEN_MP_VERIFICADA" && e.estado === "failed" && e.detalle === "rejected"));
+    assert.deepEqual(eventos.find(e => e.resultado === "ORDEN_MP_VERIFICADA").transacciones,
+      [{ estado: "failed", detalle: "cc_rejected_3ds_challenge" }]);
     await f.servicio.consultarIntento(f.compra.claveSolicitud, f.usuario.id);
     assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.producto.id } })).stock, 10);
     assert.equal(await db.pedido.count({ where: { usuarioId: f.usuario.id } }), 0);

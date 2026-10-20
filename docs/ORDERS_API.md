@@ -162,6 +162,12 @@ contiene exclusivamente nombres públicos conocidos del contrato de la solicitud
 `formato` identifica la estructura de error recibida. No contiene valores del comprador.
 Una orden consultada y validada registra `ORDEN_MP_VERIFICADA` con estado y detalle
 cuando cambian; permite identificar un rechazo del proveedor con HTTP exitoso.
+`transacciones` incluye los códigos de estado y detalle de cada pago. El detalle
+de la orden puede ser solo `failed`, mientras el de la transacción identifica
+el motivo, por ejemplo `cc_rejected_3ds_challenge`. No se registran mensajes ni valores del comprador.
+Para consultar una orden ya rechazada sin iniciar otro pago, tras compilar el backend:
+`npm run diagnostico:orden -- ID_ORDEN`. Lee `MP_ACCESS_TOKEN` del entorno o de
+`back/.env` y solo realiza un GET a Mercado Pago; no necesita conexión a la base de datos.
 Los errores de red conocidos se identifican mediante códigos como `ENOTFOUND`,
 `ECONNRESET` o `TIMEOUT` sin imprimir direcciones ni credenciales.
 
