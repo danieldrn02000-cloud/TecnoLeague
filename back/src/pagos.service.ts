@@ -390,6 +390,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
             intentoId: id, operacionId: preparada.operacion.id,
             resultado: "ERROR_CREAR_ORDEN_MP", http: error.httpProveedor,
             codigo: error.diagnostico.codigo, causas: error.diagnostico.causas,
+            campos: error.diagnostico.campos, formato: error.diagnostico.formato,
             requestId: error.diagnostico.requestId, reenvio: preparada.reenvio,
           }));
         }

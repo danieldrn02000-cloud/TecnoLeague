@@ -58,7 +58,7 @@ export class ErrorOrdersMP extends ServiceUnavailableException {
   readonly rechazadoDefinitivo: boolean;
   constructor(
     public readonly httpProveedor: number | null,
-    public readonly diagnostico: { codigo?: string; causas?: string[]; requestId?: string } = {},
+    public readonly diagnostico: { codigo?: string; causas?: string[]; campos?: string[]; formato?: string; requestId?: string } = {},
   ) {
     super(
       httpProveedor === null
@@ -206,18 +206,8 @@ export class MercadoPagoOrdersService {
     if (!respuesta.ok) {
       // Extraer solo códigos y el ID de soporte; nunca mensajes ni cuerpos.
       const cuerpo: unknown = await respuesta.json().catch(() => null);
-      const codigo = (v: unknown) => typeof v === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(v)
-        ? v : typeof v === "number" && Number.isSafeInteger(v) ? String(v) : undefined;
-      const datos = cuerpo && typeof cuerpo === "object" ? cuerpo as Record<string, unknown> : {};
-      const causas = Array.isArray(datos.cause) ? datos.cause.slice(0, 10).flatMap((c: unknown) => {
-        const valor = c && typeof c === "object" && "code" in c ? codigo(c.code) : undefined;
-        return valor ? [valor] : [];
-      }) : [];
-      throw new ErrorOrdersMP(respuesta.status, {
-        codigo: codigo(datos.error) ?? codigo(datos.code),
-        causas,
-        requestId: codigo(respuesta.headers.get("x-request-id")),
-      });
+      throw new ErrorOrdersMP(respuesta.status,
+        this.diagnosticoError(cuerpo, respuesta.headers.get("x-request-id")));
     }
 
     let resultado: unknown;
@@ -255,6 +245,58 @@ export class MercadoPagoOrdersService {
       user_id: typeof orden.user_id === "string" || typeof orden.user_id === "number" ? orden.user_id : undefined,
       last_updated_date: typeof orden.last_updated_date === "string" ? orden.last_updated_date : undefined,
       transactions: this.extraerAutenticacion(orden.transactions),
+    };
+  }
+
+  private diagnosticoError(cuerpo: unknown, requestId: string | null): ErrorOrdersMP["diagnostico"] {
+    const codigo = (v: unknown) => typeof v === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(v)
+      ? v : typeof v === "number" && Number.isSafeInteger(v) ? String(v) : undefined;
+    const datos: Record<string, unknown> = Array.isArray(cuerpo) ? { errors: cuerpo }
+      : cuerpo && typeof cuerpo === "object" ? cuerpo as Record<string, unknown> : {};
+    // Solo nombres conocidos del contrato: nunca imprimir valores ni mensajes.
+    const camposPermitidos = new Set([
+      "type", "processing_mode", "capture_mode", "currency", "total_amount", "external_reference",
+      "payer", "payer.email", "payer.identification", "payer.identification.type", "payer.identification.number",
+      "transactions", "transactions.payments", "transactions.payments[0].amount",
+      "transactions.payments[0].payment_method", "transactions.payments[0].payment_method.id",
+      "transactions.payments[0].payment_method.type", "transactions.payments[0].payment_method.token",
+      "transactions.payments[0].payment_method.installments",
+      "transactions.payments[0].payment_method.transaction_security",
+      "transactions.payments[0].payment_method.transaction_security.validation",
+    ]);
+    const campos = new Set<string>();
+    const registros: Record<string, unknown>[] = [];
+    const campo = (valor: unknown) => {
+      if (typeof valor !== "string" || valor.length > 2048) return;
+      const normalizado = valor.replace(/^\//, "").replace(/\/(\d+)(?=\/|$)/g, "[$1]").replace(/\//g, ".");
+      if (camposPermitidos.has(normalizado)) { campos.add(normalizado); return; }
+      // Algunos formatos nombran el campo dentro de una descripción. Extraer
+      // únicamente nombres públicos conocidos, nunca guardar la descripción.
+      for (const nombre of valor.match(/[A-Za-z_][A-Za-z0-9_]*(?:(?:\.[A-Za-z_][A-Za-z0-9_]*)|(?:\[\d+\]))*/g) ?? []) {
+        if (camposPermitidos.has(nombre)) campos.add(nombre);
+      }
+    };
+    const recoger = (valor: unknown, nivel = 0) => {
+      if (nivel > 4 || registros.length >= 30) return;
+      if (Array.isArray(valor)) { valor.slice(0, 10).forEach(v => recoger(v, nivel + 1)); return; }
+      if (!valor || typeof valor !== "object") { campo(valor); return; }
+      const registro = valor as Record<string, unknown>;
+      registros.push(registro);
+      for (const nombre of ["field", "path", "property", "parameter", "message", "description"]) campo(registro[nombre]);
+      for (const nombre of ["errors", "cause", "causes", "error", "details"]) recoger(registro[nombre], nivel + 1);
+    };
+    recoger(datos);
+    const causas = [...new Set(registros.slice(1).flatMap(r => {
+      const valor = codigo(r.code) ?? codigo(r.error);
+      return valor ? [valor] : [];
+    }))].slice(0, 10);
+    return {
+      codigo: codigo(datos.error) ?? codigo(datos.code) ?? causas[0],
+      causas,
+      campos: [...campos],
+      formato: Array.isArray(datos.errors) ? "errors" : Array.isArray(datos.cause) ? "cause"
+        : Array.isArray(datos.causes) ? "causes" : cuerpo && typeof cuerpo === "object" ? "json" : "no_json",
+      requestId: codigo(requestId),
     };
   }
 

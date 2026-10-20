@@ -151,6 +151,9 @@ npm run test:checkout
 bancario confirmado. Una solicitud inválida muestra «No se pudo iniciar el pago».
 El backend registra `ERROR_CREAR_ORDEN_MP` con HTTP, código, causas y request ID;
 no registra cuerpos, mensajes del proveedor, tokens ni datos de tarjeta.
+El extractor admite `errors`, `cause`, `causes` y errores anidados. `campos`
+contiene exclusivamente nombres públicos conocidos del contrato de la solicitud;
+`formato` identifica la estructura de error recibida. No contiene valores del comprador.
 Una orden consultada y validada registra `ORDEN_MP_VERIFICADA` con estado y detalle
 cuando cambian; permite identificar un rechazo del proveedor con HTTP exitoso.
 Los errores de red conocidos se identifican mediante códigos como `ENOTFOUND`,

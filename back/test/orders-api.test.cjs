@@ -85,9 +85,31 @@ test("Orders HTTP: el diagnóstico conserva códigos y descarta datos sensibles"
     cause: [{ code: "invalid_properties", message: "dato-sensible" }, { code: "correo@privado.test" }],
   }), { status: 400, headers: { "x-request-id": "request-123" } }));
   await assert.rejects(new MercadoPagoOrdersService().consultarOrden("ORD1"), error => {
-    assert.deepEqual(error.diagnostico, { codigo: "bad_request", causas: ["invalid_properties"], requestId: "request-123" });
+    assert.deepEqual(error.diagnostico, { codigo: "bad_request", causas: ["invalid_properties"], campos: [], formato: "cause", requestId: "request-123" });
     assert.ok(!JSON.stringify(error).includes("secreto@example.test"));
     assert.ok(!JSON.stringify(error).includes("dato-sensible"));
+    return true;
+  });
+});
+
+test("Orders HTTP: interpreta errors y rutas del campo sin exponer mensajes ni valores", async (t) => {
+  const anterior = process.env.MP_ACCESS_TOKEN;
+  process.env.MP_ACCESS_TOKEN = "token-simulado";
+  t.after(() => {
+    if (anterior === undefined) delete process.env.MP_ACCESS_TOKEN;
+    else process.env.MP_ACCESS_TOKEN = anterior;
+  });
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({
+    errors: [{ code: "unsupported_properties", message: "Invalid property capture_mode: secreto@example.test token-privado", details: ["capture_mode", "currency", "secreto@example.test"] },
+      { code: "invalid_properties", details: [{ path: "/transactions/payments/0/payment_method/type", value: "token-privado" }] }],
+  }), { status: 400 }));
+  await assert.rejects(new MercadoPagoOrdersService().consultarOrden("ORD1"), error => {
+    assert.equal(error.diagnostico.codigo, "unsupported_properties");
+    assert.deepEqual(error.diagnostico.causas, ["unsupported_properties", "invalid_properties"]);
+    assert.deepEqual(error.diagnostico.campos, ["capture_mode", "currency", "transactions.payments[0].payment_method.type"]);
+    assert.equal(error.diagnostico.formato, "errors");
+    assert.ok(!JSON.stringify(error).includes("secreto@example.test"));
+    assert.ok(!JSON.stringify(error).includes("token-privado"));
     return true;
   });
 });
