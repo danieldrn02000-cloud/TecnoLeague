@@ -8,8 +8,27 @@ export type EstadoCheckout = {
   checkoutUrl: string | null;
   expiraEn: string;
   renglones: RenglonCompra[];
+  total: string;
+  moneda: string;
+  modalidad: "REDIRECCION" | "ORDERS_API";
+  operacionId: string | null;
+  estadoOperacion: "ENVIADA" | "INCIERTA" | "VINCULADA" | "FINALIZADA" | null;
+  autenticacion: { url: string } | null;
 };
-export const CONSULTAR_INTENTO = `query($id:ID!){estadoIntento(intentoId:$id){intentoId estado pedidoId expiraEn aviso checkoutUrl renglones{productoId cantidad}}}`;
+export const CAMPOS_CHECKOUT = `intentoId estado pedidoId expiraEn aviso checkoutUrl total moneda modalidad operacionId estadoOperacion autenticacion{url} renglones{productoId cantidad}`;
+export const CONSULTAR_INTENTO = `query($id:ID!){estadoIntento(intentoId:$id){${CAMPOS_CHECKOUT}}}`;
+export const PREPARAR_COMPRA = `mutation($datos:PedidoInput!){prepararCompra(datos:$datos){${CAMPOS_CHECKOUT}}}`;
+export const PROCESAR_PAGO = `mutation($id:ID!,$pago:DatosPagoInput!){procesarPago(intentoId:$id,datosPago:$pago){${CAMPOS_CHECKOUT}}}`;
+export const CANCELAR_INTENTO = `mutation($id:ID!){cancelarIntento(intentoId:$id){${CAMPOS_CHECKOUT}}}`;
+
+export function intentoTerminado(estado: EstadoCheckout) {
+  return ["CONFIRMADO", "RECHAZADO", "CANCELADO", "EXPIRADO"].includes(estado.estado);
+}
+
+export function puedePagarIntento(estado: EstadoCheckout) {
+  return estado.modalidad === "ORDERS_API" && !intentoTerminado(estado) &&
+    !estado.operacionId && new Date(estado.expiraEn).getTime() > Date.now();
+}
 const clave = (usuarioId: number) => `tl-checkout-${usuarioId}`;
 
 export function guardarIntento(usuarioId: number, intentoId: string) {

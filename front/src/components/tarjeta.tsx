@@ -2,17 +2,18 @@
 import { useEffect, useId, useRef, useState } from "react";
 import {
   obtenerMercadoPago,
-  type DatosTarjeta,
+  type TarjetaTokenizada,
   type InstanciaCardForm,
 } from "../lib/mercadoPago";
 
 type Props = {
   importe: string;
-  onToken: (datos: DatosTarjeta) => void;
+  procesando?: boolean;
+  onToken: (datos: TarjetaTokenizada) => Promise<void>;
 };
 
 //formulario:
-export function FormularioTarjeta({ importe, onToken }: Props) {
+export function FormularioTarjeta({ importe, procesando = false, onToken }: Props) {
   const reactId = useId();
   const prefijo = `mp-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const id = (campo: string) => `${prefijo}-${campo}`;
@@ -21,6 +22,8 @@ export function FormularioTarjeta({ importe, onToken }: Props) {
   const [listo, setListo] = useState(false);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const enviando = useRef(false);
+  const [enviandoToken, setEnviandoToken] = useState(false);
 
   useEffect(() => {
     onTokenRef.current = onToken;
@@ -29,6 +32,7 @@ export function FormularioTarjeta({ importe, onToken }: Props) {
   useEffect(() => {
     let activo = true;
     let formulario: InstanciaCardForm | undefined;
+    let metodos: { id: string; payment_type_id: string }[] = [];
 
     const campo = (nombre: string) => `${prefijo}-${nombre}`;
 
@@ -98,9 +102,17 @@ export function FormularioTarjeta({ importe, onToken }: Props) {
               setListo(true);
             },
 
-            onSubmit(event) {
+            onBinChange() { metodos = []; },
+            onPaymentMethodsReceived(errorMetodos, data) {
+              if (!activo) return;
+              metodos = errorMetodos ? [] : data?.results ?? [];
+            },
+            onError() {
+              if (activo) setError("Revisa los datos de la tarjeta e intenta nuevamente.");
+            },
+            async onSubmit(event) {
               event.preventDefault();
-              if (!activo || !formulario) return;
+              if (!activo || !formulario || enviando.current) return;
 
               setError("");
 
@@ -112,14 +124,22 @@ export function FormularioTarjeta({ importe, onToken }: Props) {
                     "No se pudo generar el token. Revisa los datos de la tarjeta.",
                   );
                 }
-
-                onTokenRef.current(datos);
+                const tipo = metodos.find(m => m.id === datos.paymentMethodId)?.payment_type_id;
+                if (tipo !== "credit_card" && tipo !== "debit_card") {
+                  throw new Error("No pudimos identificar el tipo de tarjeta. Revisa el número e intenta nuevamente.");
+                }
+                enviando.current = true;
+                setEnviandoToken(true);
+                await onTokenRef.current({ ...datos, paymentTypeId: tipo });
               } catch (errorEnvio) {
-                setError(
+                if (activo) setError(
                   errorEnvio instanceof Error
                     ? errorEnvio.message
                     : "No se pudo validar la tarjeta.",
                 );
+              } finally {
+                enviando.current = false;
+                if (activo) setEnviandoToken(false);
               }
             },
           },
@@ -146,13 +166,14 @@ export function FormularioTarjeta({ importe, onToken }: Props) {
   return (
     <section className="tarjeta-panel panel">
       <h2>Pago con tarjeta</h2>
-      <p>Importe de referencia: ${importe} MXN</p>
+      <p>Total confirmado: ${importe} MXN</p>
 
       <form
         id={id("form")}
         className="tarjeta-form"
         onSubmit={(event) => event.preventDefault()}
       >
+        <fieldset disabled={procesando || enviandoToken}>
         <div>
           <label htmlFor={id("titular")}>Titular</label>
           <input id={id("titular")} type="text" autoComplete="cc-name" />
@@ -213,9 +234,10 @@ export function FormularioTarjeta({ importe, onToken }: Props) {
           </div>
         )}
 
-        <button type="submit" className="btn" disabled={!listo}>
-          Validar tarjeta de prueba
+        <button type="submit" className="btn" disabled={!listo || procesando || enviandoToken}>
+          {procesando || enviandoToken ? "Procesando…" : `Pagar $${importe} MXN`}
         </button>
+        </fieldset>
       </form>
     </section>
   );

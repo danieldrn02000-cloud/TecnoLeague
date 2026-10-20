@@ -216,6 +216,11 @@ enum EstadoOperacionCobro{
   FINALIZADA
 }
 
+enum ModoCapturaOrders {
+  automatic
+  automatic_async
+}
+
 model IntentoCompra {
   id String @id @default(uuid())
   usuarioId Int @map("usuario_id")
@@ -268,6 +273,8 @@ model OperacionCobro {
   intento IntentoCompra @relation(fields: [intentoId], references: [id], onDelete: Restrict)
   claveSolicitud String @unique @map("clave_solicitud")
   claveIdempotencia String @unique @map("clave_idempotencia")
+  huellaSolicitud String @map("huella_solicitud")
+  modoCaptura ModoCapturaOrders @default(automatic) @map("modo_captura")
   idOrdenExterna String? @unique @map("id_orden_externa")
   estado EstadoOperacionCobro @default(ENVIADA)
   estadoProveedor String? @map("estado_proveedor")

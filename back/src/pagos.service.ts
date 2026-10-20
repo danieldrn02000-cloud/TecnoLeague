@@ -11,7 +11,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { PrismaService } from "./prisma.service";
 import { fallo } from "./tienda.service";
 import type {DatosPagoInput, PedidoInput} from "./types"
-import { MercadoPagoOrdersService, type OrdenMP } from "./mercadopago-orders.service";
+import { ErrorOrdersMP, MercadoPagoOrdersService, type OrdenMP } from "./mercadopago-orders.service";
 
 type RecursoMP = {
   id?: string | number;
@@ -27,9 +27,10 @@ type RecursoMP = {
   collector_id?: string | number;
   order?: { id?: string | number };
   last_updated_date?: string;
+  transactions?: OrdenMP["transactions"];
 };
 
-const incluirIntento = { detalles: true, pago: true } as const;
+const incluirIntento = { detalles: true, pago: true, operaciones: true } as const;
 type Intento = Prisma.IntentoCompraGetPayload<{
   include: typeof incluirIntento;
 }>;
@@ -293,6 +294,136 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     return this.consultarIntento(intento.id, usuarioId);
   }
 
+  async procesarPago(id: string, datos: DatosPagoInput, usuarioId: number) {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(datos.claveOperacion) ||
+      !/^[a-zA-Z0-9_-]{1,200}$/.test(datos.token) ||
+      !/^[a-zA-Z0-9_-]{1,80}$/.test(datos.metodoPagoId) ||
+      !["credit_card", "debit_card"].includes(datos.tipoMetodoPago) ||
+      !Number.isInteger(datos.cuotas) || datos.cuotas < 1 || datos.cuotas > 36 ||
+      (datos.tipoMetodoPago === "debit_card" && datos.cuotas !== 1) ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(datos.email) || datos.email.length > 150 ||
+      (datos.identificacion && (
+        !/^[a-zA-Z0-9_-]{1,30}$/.test(datos.identificacion.tipo) ||
+        !/^[a-zA-Z0-9 .-]{1,40}$/.test(datos.identificacion.numero)
+      ))
+    ) fallo("Revisa los datos de pago y la clave de la operación.");
+
+    this.configuracion();
+    if (!process.env.MP_WEBHOOK_SECRET) fallo("Configura MP_WEBHOOK_SECRET en el backend.");
+
+    // Solo se persiste el digest; nunca el token ni el documento. Permite
+    // recuperar una solicitud incierta con exactamente el mismo payload.
+    const huella = createHash("sha256").update(JSON.stringify({
+      token: datos.token,
+      metodoPagoId: datos.metodoPagoId,
+      tipoMetodoPago: datos.tipoMetodoPago,
+      cuotas: datos.cuotas,
+      email: datos.email.trim().toLowerCase(),
+      identificacion: datos.identificacion ? {
+        tipo: datos.identificacion.tipo, numero: datos.identificacion.numero,
+      } : null,
+    })).digest("hex");
+
+    // El registro se confirma ANTES de hacer HTTP. Dos solicitudes concurrentes
+    // nunca pueden iniciar dos cobros para una misma reserva.
+    const preparada = await this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM intentos_compra WHERE id = ${id} FOR UPDATE`;
+      const intento = await tx.intentoCompra.findFirst({
+        where: { id, usuarioId }, include: incluirIntento,
+      });
+      if (!intento) fallo("Intento no encontrado.", "NOT_FOUND");
+      if (intento.modalidad !== "ORDERS_API") fallo("Este intento utiliza el checkout anterior.");
+      const repetida = await tx.operacionCobro.findUnique({
+        where: { claveSolicitud: datos.claveOperacion },
+      });
+      if (repetida && repetida.intentoId !== id) fallo("La clave de operación ya se utilizó.");
+      if (intento.operaciones.length) {
+        const operacion = intento.operaciones[0];
+        // Acotar los reenvíos: no asumir que MP conserva la idempotencia para siempre.
+        const dentroDeVentana = operacion.creadoEn.getTime() > Date.now() - MINUTOS_RESERVA * 60_000;
+        const recuperable = dentroDeVentana && (operacion.estado === "INCIERTA" ||
+          (operacion.estado === "ENVIADA" && operacion.actualizadoEn.getTime() < Date.now() - 60_000));
+        if (repetida && recuperable && !operacion.idOrdenExterna && pendientes.includes(intento.estado)) {
+          if (operacion.huellaSolicitud !== huella) {
+            fallo("La operación incierta requiere la misma clave y los mismos datos de pago. Consulta su resultado.");
+          }
+          await tx.operacionCobro.update({ where: { id: operacion.id }, data: { estado: "ENVIADA" } });
+          return { intento, operacion, enviar: true, reenvio: true };
+        }
+        return { intento, operacion, enviar: false, reenvio: false };
+      }
+      if (!pendientes.includes(intento.estado) || !intento.reservaActiva || intento.expiraEn <= new Date()) {
+        fallo("La reserva terminó. Consulta el intento antes de preparar otra compra.");
+      }
+      const operacionId = randomUUID();
+      const operacion = await tx.operacionCobro.create({ data: {
+        id: operacionId,
+        intentoId: id,
+        claveSolicitud: datos.claveOperacion,
+        claveIdempotencia: operacionId,
+        huellaSolicitud: huella,
+        modoCaptura: "automatic_async",
+      } });
+      await tx.intentoCompra.update({ where: { id }, data: { estado: "EN_PROCESO" } });
+      return { intento, operacion, enviar: true, reenvio: false };
+    }, { maxWait: 10000, timeout: 15000 });
+
+    if (preparada.enviar) {
+      try {
+        const orden = await this.orders.crearYProcesarOrden({
+          modoCaptura: preparada.operacion.modoCaptura,
+          total: preparada.intento.total.toFixed(2),
+          referenciaExterna: `TL-OP-${preparada.operacion.id}`,
+          claveIdempotencia: preparada.operacion.claveIdempotencia,
+          token: datos.token,
+          metodoPagoId: datos.metodoPagoId,
+          tipoMetodoPago: datos.tipoMetodoPago,
+          cuotas: datos.cuotas,
+          email: datos.email.trim().toLowerCase(),
+          identificacion: datos.identificacion ?? undefined,
+        });
+        await this.vincularOrdenApi(preparada.operacion.id, orden);
+      } catch (error) {
+        // Un error del REENVÍO no demuestra que la primera llamada no cobró.
+        const rechazado = !preparada.reenvio && error instanceof ErrorOrdersMP && error.rechazadoDefinitivo;
+        await this.db.operacionCobro.updateMany({
+          where: { id: preparada.operacion.id, estado: "ENVIADA" },
+          data: {
+            estado: rechazado ? "FINALIZADA" : "INCIERTA",
+            estadoProveedor: rechazado ? `HTTP_${error.httpProveedor}` : undefined,
+          },
+        });
+        if (rechazado) return this.consultarIntento(id, usuarioId);
+        await this.registrarFallo(id, error);
+        // No guardar el token. El webhook recupera la orden; un reenvío explícito
+        // solo acepta la misma clave y el mismo payload con idempotencia MP.
+        throw new ServiceUnavailableException("No se pudo confirmar el cobro. Consulta el mismo intento; no inicies otro pago.");
+      }
+    }
+    return this.consultarIntento(id, usuarioId);
+  }
+
+  private async vincularOrdenApi(operacionId: string, orden: RecursoMP) {
+    const operacion = await this.db.operacionCobro.findUnique({ where: { id: operacionId } });
+    if (!operacion) throw new ServiceUnavailableException("Operación de cobro no encontrada.");
+    await this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM intentos_compra WHERE id = ${operacion.intentoId} FOR UPDATE`;
+      const intento = await tx.intentoCompra.findUniqueOrThrow({
+        where: { id: operacion.intentoId }, include: incluirIntento,
+      });
+      this.verificarOrden(orden, intento);
+      if (!intento.pago) throw new ServiceUnavailableException("Intento sin registro de pago.");
+      await tx.operacionCobro.updateMany({
+        where: { id: operacionId, estado: { not: "FINALIZADA" } },
+        data: { idOrdenExterna: String(orden.id), estado: "VINCULADA", estadoProveedor: orden.status },
+      });
+      await tx.pago.update({
+        where: { id: intento.pago.id }, data: { idOrdenExterna: String(orden.id) },
+      });
+    });
+  }
+
   async iniciarPago(datos: PedidoInput, usuarioId: number) {
     this.configuracion();
     if (!process.env.MP_WEBHOOK_SECRET) fallo("Configura MP_WEBHOOK_SECRET en el backend.");
@@ -441,10 +572,11 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     });
     if (!intento) fallo("Intento no encontrado.", "NOT_FOUND");
     let aviso: string | null = null;
+    let autenticacion: { url: string } | null = null;
     if (pendientes.includes(intento.estado)) {
       try {
         await this.prepararOrden(id);
-        await this.conciliar(id);
+        autenticacion = (await this.conciliar(id)).autenticacion;
       } catch (error) {
         aviso =
           "No pudimos verificar el pago todavía. Conservamos el carrito; vuelve a consultar este intento.";
@@ -459,8 +591,10 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
       intentoId: id,
       total:actual.total.toFixed(2),
       moneda: actual.moneda,
+      modalidad: actual.modalidad,
+      autenticacion: pendientes.includes(actual.estado) ? autenticacion : null,
       operacionId: actual.operaciones[0]?.id ?? null,
-      esadoOperacion: actual.operaciones[0]?.estado ?? null,
+      estadoOperacion: actual.operaciones[0]?.estado ?? null,
       estado: actual.estado,
       pedidoId: actual.pedidoId,
       expiraEn: actual.expiraEn.toISOString(),
@@ -509,6 +643,15 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         where: { id: referencia.slice("TL-INTENTO-".length) },
       });
     }
+    if (!intento && tipo === "order" && referencia?.startsWith("TL-OP-")) {
+      const operacion = await this.db.operacionCobro.findUnique({
+        where: { id: referencia.slice("TL-OP-".length) },
+      });
+      if (!operacion) throw new ServiceUnavailableException("Operación aún no disponible; reintentar.");
+      // Recupera incluso si MP cobró pero se perdió la respuesta del POST.
+      await this.vincularOrdenApi(operacion.id, recurso);
+      intento = await this.db.intentoCompra.findUnique({ where: { id: operacion.intentoId } });
+    }
     if (!intento) {
       // Compatibilidad con órdenes vinculadas a pedidos anteriores a esta migración.
       const legacy =
@@ -530,7 +673,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     }
     try {
       await this.prepararOrden(intento.id);
-      const resultado = await this.conciliar(intento.id);
+      const { resultado } = await this.conciliar(intento.id);
       this.logger.log(
         JSON.stringify({ tipo, recursoId, intentoId: intento.id, resultado }),
       );
@@ -539,6 +682,22 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
       await this.registrarFallo(intento.id, error);
       throw error;
     }
+  }
+
+  private autenticacionOrden(orden: RecursoMP): { url: string } | null {
+    for (const pago of orden.transactions?.payments ?? []) {
+      const seguridad = pago.payment_method?.transaction_security;
+      const direccion = seguridad?.url ?? (orden.status === "action_required" ? pago.payment_method?.redirect_url : undefined);
+      if (!direccion || (seguridad?.type && seguridad.type !== "challenge") ||
+          (seguridad?.status && !["pending", "waiting_challenge"].includes(seguridad.status))) continue;
+      try {
+        const url = new URL(direccion);
+        if (url.protocol === "https:" && !url.username && !url.password && url.href.length <= 4096) {
+          return { url: url.href };
+        }
+      } catch { /* Una URL inválida no se expone al navegador. */ }
+    }
+    return null;
   }
 
   private async conciliar(id: string, cancelar = false) {
@@ -552,11 +711,34 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
           include: incluirIntento,
         });
         const pago = intento.pago;
-        if (!pago?.idOrdenExterna)
-          throw new ServiceUnavailableException("Orden todavía no vinculada.");
-        let orden = await this.solicitar(
-          `/v1/orders/${encodeURIComponent(pago.idOrdenExterna)}`,
-        );
+        if (!pago?.idOrdenExterna) {
+          const rechazado = intento.operaciones[0]?.estado === "FINALIZADA";
+          if (intento.modalidad === "ORDERS_API" && (!intento.operaciones.length || rechazado)) {
+            if (!rechazado && !cancelar && intento.expiraEn > new Date()) return { resultado: "SIN_COBRO", autenticacion: null };
+            // No se inició ninguna llamada de cobro. Es seguro liberar la reserva.
+            for (const d of intento.detalles) {
+              if (!intento.reservaActiva) break;
+              await tx.producto.update({ where: { id: d.productoId }, data: { stock: { increment: d.cantidad } } });
+              await tx.movimientoInventario.create({ data: {
+                productoId: d.productoId, usuarioId: intento.usuarioId,
+                tipo: "LIBERACION", cantidad: d.cantidad, motivo: `Reserva sin cobro ${id}`,
+              } });
+              emitir({ entidad: "INVENTARIO", entidadId: d.productoId, accion: "ACTUALIZADO" });
+            }
+            await tx.intentoCompra.update({ where: { id }, data: {
+              estado: rechazado ? "RECHAZADO" : cancelar ? "CANCELADO" : "EXPIRADO", reservaActiva: false,
+            } });
+            if (pago) {
+              await tx.pago.update({ where: { id: pago.id }, data: { estado: rechazado ? "RECHAZADO" : "CANCELADO" } });
+              emitir({ entidad: "PAGO", entidadId: pago.id, accion: "ACTUALIZADO" });
+            }
+            return { resultado: rechazado ? "RECHAZADO" : cancelar ? "CANCELADO" : "EXPIRADO", autenticacion: null };
+          }
+          throw new ServiceUnavailableException("Orden todavía no vinculada; no iniciar otro cobro.");
+        }
+        let orden: RecursoMP = intento.modalidad === "ORDERS_API"
+          ? await this.orders.consultarOrden(pago.idOrdenExterna)
+          : await this.solicitar(`/v1/orders/${encodeURIComponent(pago.idOrdenExterna)}`);
         this.verificarOrden(orden, intento);
         const acreditado = () =>
           orden.status === "processed" && orden.status_detail === "accredited";
@@ -591,6 +773,12 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
           );
         }
         const estadoProveedor = `${orden.status ?? "unknown"}:${orden.status_detail ?? "unknown"}`;
+        if (intento.modalidad === "ORDERS_API") {
+          await tx.operacionCobro.updateMany({ where: { intentoId: id }, data: {
+            estado: acreditado() || terminal() ? "FINALIZADA" : "VINCULADA",
+            estadoProveedor,
+          } });
+        }
         const claveEvento = createHash("sha256")
           .update(
             JSON.stringify([
@@ -632,7 +820,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
               entidadId: pago.id,
               accion: "ACTUALIZADO",
             });
-          return "YA_CONFIRMADO";
+          return { resultado: "YA_CONFIRMADO", autenticacion: null };
         }
         if (acreditado()) {
           if (!intento.reservaActiva) {
@@ -722,7 +910,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
                 accion: "ACTUALIZADO",
               });
           }
-          return "CONFIRMADO";
+          return { resultado: "CONFIRMADO", autenticacion: null };
         }
         if (terminal()) {
           if (intento.reservaActiva) {
@@ -790,7 +978,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
                 accion: "ACTUALIZADO",
               });
           }
-          return estado;
+          return { resultado: estado, autenticacion: null };
         }
         await tx.pago.update({
           where: { id: pago.id },
@@ -810,7 +998,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
             entidadId: pago.id,
             accion: "ACTUALIZADO",
           });
-        return "EN_PROCESO";
+        return { resultado: "EN_PROCESO", autenticacion: this.autenticacionOrden(orden) };
       },
       { maxWait: 10000, timeout: 45000 },
     );

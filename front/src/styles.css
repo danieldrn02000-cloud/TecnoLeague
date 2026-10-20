@@ -2684,3 +2684,34 @@ tr:last-child td {
     grid-template-columns: 1fr;
   }
 }
+.resultado-pago {
+  padding: 24px;
+  margin: 20px 0;
+}
+.resultado-pago-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-top: 20px;
+}
+.autenticacion-pago iframe {
+  display: block;
+  width: 100%;
+  min-height: 500px;
+  border: 1px solid #888;
+  border-radius: 8px;
+  background: #fff;
+}
+.retorno-pago {
+  max-width: 760px;
+  margin: 48px auto;
+  padding: 0 16px;
+}
+.tarjeta-form fieldset {
+  display: grid;
+  gap: 16px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}

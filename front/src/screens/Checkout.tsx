@@ -1,199 +1,190 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, Check, Package, Truck } from "lucide-react";
+import { ArrowLeft, Check, Truck } from "lucide-react";
 import { graphql } from "../api";
 import { useCarrito } from "../store";
 import type { AuthUser, Navegar, Pedido } from "../types";
 import { Resumen } from "./Carrito";
 import { Vacio } from "../components/ui";
-import { guardarIntento, leerIntento } from "../lib/checkout";
+import { guardarIntento, intentoTerminado, leerIntento, puedePagarIntento, PREPARAR_COMPRA, PROCESAR_PAGO, type EstadoCheckout } from "../lib/checkout";
 import { verificarCheckout } from "../lib/verificar-checkout";
+import { useEstadoPago } from "../lib/use-estado-pago";
 import { FormularioTarjeta } from "../components/tarjeta";
+import { ResultadoPago } from "../components/ResultadoPago";
+import type { TarjetaTokenizada } from "../lib/mercadoPago";
 
-export function Checkout({
-  currentUser,
-  navegar,
-}: {
+export function Checkout({ currentUser, navegar }: {
   currentUser: AuthUser;
   navegar: Navegar;
   completado: (p: Pedido) => void;
 }) {
   const { lineas } = useCarrito();
-  const [tarjetaValidada, setTarjetaValidada] = useState(false);
-  //importe provisional para probar el formualrio.
-  const importeReferencia = lineas.reduce(
-    (total, linea) => total + linea.producto.precio * linea.cantidad,0).toFixed(2);
+  const seguimiento = useEstadoPago(currentUser.id);
+  const { recibir, recuperar } = seguimiento;
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const bloqueado = useRef(false);
-  const [pendiente, setPendiente] = useState<string | null>(null);
+  const [enviado, setEnviado] = useState(false);
   const [verificando, setVerificando] = useState(true);
   const [falloVerificacion, setFalloVerificacion] = useState(false);
-  const [aviso, setAviso] = useState("");
   const [revision, setRevision] = useState(0);
+  const bloqueado = useRef(false);
+  const solicitud = useRef({ contenido: "", clave: "" });
+  const operacion = useRef({ intentoId: "", clave: "" });
+  const estado = seguimiento.estado;
+
   useEffect(() => {
     let activo = true;
     setVerificando(true);
     setFalloVerificacion(false);
-    setError("");
-    setPendiente(leerIntento(currentUser.id));
-    verificarCheckout(currentUser.id)
-      .then((resultado) => {
-        if (!activo) return;
-        setPendiente(resultado.pendiente);
-        setAviso(resultado.aviso);
-      })
-      .catch((error) => {
+    async function verificar() {
+      try {
+        const resultado = await verificarCheckout(currentUser.id);
+        if (activo) await recibir(resultado.estado);
+      } catch (e) {
         if (!activo) return;
         setFalloVerificacion(true);
-        setError(
-          `No pudimos comprobar tus pagos. ${error instanceof Error ? error.message : "Reintenta la comprobación."}`,
-        );
-      })
-      .finally(() => {
+        setError(e instanceof Error ? e.message : "No pudimos comprobar tus pagos.");
+        const local = leerIntento(currentUser.id);
+        if (local) recuperar(local);
+      } finally {
         if (activo) setVerificando(false);
-      });
-    return () => {
-      activo = false;
+      }
+    }
+    void verificar();
+    return () => { activo = false; };
+  }, [currentUser.id, recibir, recuperar, revision]);
+
+  useEffect(() => {
+    if (estado) {
+      setFalloVerificacion(false);
+      if (intentoTerminado(estado)) setError("");
+      if (puedePagarIntento(estado)) setEnviado(false);
+    }
+  }, [estado]);
+
+  useEffect(() => {
+    const recordar = () => {
+      if (!seguimiento.referencia || (estado && intentoTerminado(estado))) return;
+      try { sessionStorage.setItem("tl-pantalla-pendiente", "checkout"); } catch { /* El intento sigue recuperable por usuario. */ }
     };
-  }, [currentUser.id, revision]);
-  const solicitud = useRef({ contenido: "", clave: "" });
-  if (!lineas.length && !pendiente && !verificando && !falloVerificacion)
-    return (
-      <>
-        {aviso && <p role="status">{aviso}</p>}
-        <Vacio
-          titulo="No hay productos en el carrito"
-          texto="Agrega un producto para continuar."
-          accion="Ver catálogo"
-          onClick={() => navegar({ tipo: "catalogo" })}
-        />
-      </>
-    );
+    window.addEventListener("pagehide", recordar);
+    return () => window.removeEventListener("pagehide", recordar);
+  }, [seguimiento.referencia, estado]);
 
-  async function enviar(e: FormEvent<HTMLFormElement>) {
+  async function preparar(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (
-      bloqueado.current ||
-      pendiente ||
-      verificando ||
-      falloVerificacion ||
-      !lineas.length
-    )
-      return;
-    bloqueado.current = true;
-    setBusy(true);
-    setError("");
-
+    if (bloqueado.current || verificando || falloVerificacion || seguimiento.referencia || !lineas.length) return;
     const form = new FormData(e.currentTarget);
-    const payload = {
+    const datos = {
       nombre: String(form.get("nombre")).trim(),
       email: String(form.get("email")).trim(),
       direccion: [
         `${String(form.get("calle")).trim()} ${String(form.get("numeroExterior")).trim()}`,
-        String(form.get("colonia")).trim(),
-        String(form.get("ciudad")).trim(),
+        String(form.get("colonia")).trim(), String(form.get("ciudad")).trim(),
         `C.P. ${String(form.get("codigoPostal")).trim()}`,
-        form.get("numeroInterior")
-          ? `Int. ${String(form.get("numeroInterior")).trim()}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join(", "),
-      renglones: lineas.map((l) => ({
-        productoId: l.producto.id,
-        cantidad: l.cantidad,
-      })),
+        form.get("numeroInterior") ? `Int. ${String(form.get("numeroInterior")).trim()}` : "",
+      ].filter(Boolean).join(", "),
+      renglones: lineas.map(l => ({ productoId: l.producto.id, cantidad: l.cantidad })),
     };
-
-    const contenido = JSON.stringify(payload);
-    if (solicitud.current.contenido !== contenido)
-      solicitud.current = { contenido, clave: crypto.randomUUID() };
-
+    const contenido = JSON.stringify(datos);
+    if (solicitud.current.contenido !== contenido) solicitud.current = { contenido, clave: crypto.randomUUID() };
+    bloqueado.current = true;
+    setBusy(true);
+    setError("");
     try {
-      // La clave también es el ID del intento: sobrevive incluso si se pierde
-      // la respuesta después de que el servidor reservó stock.
-      const intentoId = solicitud.current.clave;
-      guardarIntento(currentUser.id, intentoId);
-      const { iniciarPago } = await graphql<{
-        iniciarPago: {
-          intentoId: string;
-          checkoutUrl: string | null;
-          estado: string;
-          pedidoId: number | null;
-        };
-      }>(
-        `
-          mutation Pagar($datos: PedidoInput!) {
-            iniciarPago(datos: $datos) {
-              intentoId
-              checkoutUrl
-              estado
-              pedidoId
-            }
-          }
-        `,
-        { datos: { ...payload, claveSolicitud: intentoId } },
-      );
-      setPendiente(iniciarPago.intentoId);
-      window.location.assign(
-        iniciarPago.checkoutUrl ??
-          `/pago/retorno?intento=${encodeURIComponent(iniciarPago.intentoId)}`,
-      );
+      guardarIntento(currentUser.id, solicitud.current.clave);
+      const data = await graphql<{ prepararCompra: EstadoCheckout }>(PREPARAR_COMPRA, {
+        datos: { ...datos, claveSolicitud: solicitud.current.clave },
+      });
+      await recibir(data.prepararCompra);
     } catch (e) {
-      const mensaje =
-        e instanceof Error ? e.message : "No se pudo iniciar el pago.";
-      setError(mensaje);
-      // Mantener la clave ante una respuesta incierta; consultar su existencia
-      // antes de permitir otra compra. Un rechazo anterior a crear el intento
-      // no debe dejar un ID fantasma bloqueando el checkout.
-      setVerificando(true);
+      setError(e instanceof Error ? e.message : "No pudimos preparar tu compra.");
       try {
         const resultado = await verificarCheckout(currentUser.id);
-        setPendiente(resultado.pendiente);
-        setAviso(resultado.aviso);
-        setFalloVerificacion(false);
-      } catch (error) {
-        setPendiente(leerIntento(currentUser.id));
+        await recibir(resultado.estado);
+      } catch {
         setFalloVerificacion(true);
-        setError(
-          `${mensaje} No pudimos verificar el resultado: ${error instanceof Error ? error.message : "reintenta la comprobación."}`,
-        );
-      } finally {
-        setVerificando(false);
+        const local = leerIntento(currentUser.id);
+        if (local) recuperar(local);
       }
     } finally {
       bloqueado.current = false;
       setBusy(false);
     }
   }
+
+  async function pagar(tarjeta: TarjetaTokenizada) {
+    if (bloqueado.current || !estado) return;
+    if (!puedePagarIntento(estado)) {
+      setError("La reserva necesita verificarse antes de pagar.");
+      recuperar(estado.intentoId);
+      return;
+    }
+    const id = estado.intentoId;
+    bloqueado.current = true;
+    setBusy(true);
+    setEnviado(true);
+    setError("");
+    if (operacion.current.intentoId !== id) operacion.current = { intentoId: id, clave: crypto.randomUUID() };
+    try {
+      guardarIntento(currentUser.id, id);
+      const data = await graphql<{ procesarPago: EstadoCheckout }>(PROCESAR_PAGO, {
+        id,
+        pago: {
+          claveOperacion: operacion.current.clave,
+          token: tarjeta.token,
+          metodoPagoId: tarjeta.paymentMethodId,
+          tipoMetodoPago: tarjeta.paymentTypeId,
+          cuotas: Number(tarjeta.installments),
+          email: tarjeta.cardholderEmail,
+          ...(tarjeta.identificationType && tarjeta.identificationNumber ? {
+            identificacion: { tipo: tarjeta.identificationType, numero: tarjeta.identificationNumber },
+          } : {}),
+        },
+      });
+      await recibir(data.procesarPago);
+    } catch {
+      setError("No pudimos confirmar la respuesta del pago. Estamos consultando el mismo intento; no pagues otra vez.");
+      recuperar(id);
+    } finally {
+      // El token vive solo en esta llamada; no se guarda para cobros posteriores.
+      bloqueado.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function nuevaCompra() {
+    if (busy) return;
+    solicitud.current = { contenido: "", clave: "" };
+    operacion.current = { intentoId: "", clave: "" };
+    setEnviado(false);
+    setError("");
+    await recibir(null);
+    setRevision(n => n + 1);
+  }
+
   return (
     <>
-      <button
-        className="back-link"
-        disabled={busy}
-        onClick={() => navegar({ tipo: "carrito" })}
-      >
+      <button className="back-link" disabled={busy} onClick={() => navegar({ tipo: "carrito" })}>
         <ArrowLeft size={16} /> Volver al carrito
       </button>
       <div className="section-heading">
-        <div>
-          <span className="eyebrow">EL ÚLTIMO PASO</span>
-          <h1>Finaliza tu pedido</h1>
-          <p>Usa datos ficticios para presentar esta compra de demostración.</p>
-        </div>
-        <div className="checkout-steps">
-          <span>
-            <Check size={14} /> Carrito
-          </span>
-          <span className="accent">02 — Confirmación</span>
-        </div>
+        <div><span className="eyebrow">FINALIZAR COMPRA</span><h1>Entrega y pago</h1></div>
       </div>
-      <form className="compra-grid" onSubmit={enviar}>
-        <div className="checkout-form panel">
-          <h2>
-            <Truck size={22} /> Datos de entrega
-          </h2>
-          <fieldset disabled={busy}>
+      {verificando && <p role="status">Comprobando el estado de tus pagos…</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {falloVerificacion && <button type="button" className="text-btn" disabled={verificando} onClick={() => setRevision(n => n + 1)}>Reintentar comprobación</button>}
+      {estado && <ResultadoPago estado={estado} ocupado={busy || seguimiento.consultando}
+        error={seguimiento.error} onConsultar={seguimiento.revisar} onCancelar={() => void seguimiento.cancelar()}
+        onNuevaCompra={() => void nuevaCompra()} onPedidos={() => navegar({ tipo: "pedidos" })} />}
+      {!estado && !lineas.length && !verificando && !seguimiento.referencia && (
+        <Vacio titulo="No hay productos en el carrito" texto="Agrega un producto para continuar."
+          accion="Ver catálogo" onClick={() => navegar({ tipo: "catalogo" })} />
+      )}
+      {!estado && lineas.length > 0 && (
+        <form className="compra-grid" onSubmit={preparar}>
+          <div className="checkout-form panel">
+            <h2><Truck size={22} /> Datos de entrega</h2>
+          <fieldset disabled={busy || verificando || falloVerificacion || !!seguimiento.referencia}>
             <label>
               Nombre completo
               <input
@@ -300,92 +291,29 @@ export function Checkout({
               />
             </label>
           </fieldset>
-
-          <div className="pago"></div> 
-
-
-          {aviso && <p role="status">{aviso}</p>}
-          {verificando && (
-            <p role="status">Comprobando el estado de tus pagos…</p>
-          )}
-          {pendiente && (
-            <p role="status">
-              Conservamos la referencia de un pago. Antes de pagar otra vez,
-              <a
-                href={`/pago/retorno?intento=${encodeURIComponent(pendiente)}`}
-              >
-                {" "}
-                revisa el resultado de tu pago
-              </a>
-              .
-            </p>
-          )}
-          {error && (
-            <div className="form-error" role="alert">
-              {error}
-              {falloVerificacion && (
-                <button
-                  type="button"
-                  className="text-btn"
-                  disabled={verificando || busy}
-                  onClick={() => setRevision((n) => n + 1)}
-                >
-                  Reintentar comprobación
-                </button>
-              )}
-              <button
-                type="button"
-                className="text-btn"
-                onClick={() => navegar({ tipo: "carrito" })}
-              >
-                Revisar carrito
-              </button>
-            </div>
-          )}
-          {pendiente && !verificando && (
-            <button
-              type="button"
-              className="text-btn"
-              disabled={busy}
-              onClick={() => setRevision((n) => n + 1)}
-            >
-              Actualizar estado del pago
+          </div>
+          <Resumen>
+            <button type="submit" className="btn full" disabled={busy || verificando || falloVerificacion || !!seguimiento.referencia}>
+              {busy ? "Preparando…" : "Continuar al pago"} <Check size={18} />
             </button>
-          )}
+            <p className="muted text-sm">El servidor valida precios y disponibilidad antes del pago.</p>
+          </Resumen>
+        </form>
+      )}
+      {estado && puedePagarIntento(estado) && !enviado && (
+        <div className="compra-grid">
+          <FormularioTarjeta key={estado.intentoId} importe={estado.total} procesando={busy} onToken={pagar} />
+          <Resumen totalConfirmado={estado.total} />
         </div>
-        <Resumen>
-          <button type="submit" className="btn full" disabled>
-            Cobro pendiente de conectar
-          </button>
-          <p className="muted text-sm">
-            El servidor valida existencias y calcula el total al confirmar.
-          </p>
-        </Resumen>
-
-        {!verificando &&
-          !falloVerificacion &&
-          !pendiente &&
-          lineas.length > 0 && (
-            <>
-              <FormularioTarjeta
-                key={importeReferencia}
-                importe={importeReferencia}
-                onToken={() => {
-                  // No guardar ni imprimir el token.
-                  // En la etapa 3 se enviará directamente al backend.
-                  setTarjetaValidada(true);
-                }}
-              />
-
-              {tarjetaValidada && (
-                <p role="status">
-                  Token generado correctamente. Todavía no se ha realizado
-                  ningún cobro.
-                </p>
-              )}
-            </>
-          )}
-      </form>
+      )}
+      {busy && enviado && <p role="status">Procesando el pago. Espera el resultado…</p>}
+      {!estado && seguimiento.referencia && (
+        <div className="panel resultado-pago">
+          <p role="status">Conservamos el intento y estamos comprobando su estado.</p>
+          {seguimiento.error && <p role="alert">{seguimiento.error}</p>}
+          <button type="button" className="text-btn" disabled={seguimiento.consultando} onClick={seguimiento.revisar}>Consultar estado</button>
+        </div>
+      )}
     </>
   );
 }

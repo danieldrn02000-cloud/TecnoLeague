@@ -9,6 +9,9 @@ export type DatosTarjeta = {
   identificationType: string;
   identificationNumber: string;
 };
+export type TarjetaTokenizada = DatosTarjeta & {
+  paymentTypeId: "credit_card" | "debit_card";
+};
 
 type Campo = {
   id: string;
@@ -33,6 +36,11 @@ type ConfiguracionCardForm = {
   callbacks: {
     onFormMounted: (error?: unknown) => void;
     onSubmit: (event: Event) => void;
+    onPaymentMethodsReceived?: (error?: unknown, data?: {
+      results: { id: string; payment_type_id: string }[];
+    }) => void;
+    onBinChange?: () => void;
+    onError?: (error?: unknown) => void;
   };
 };
 

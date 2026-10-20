@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 
 export type CrearOrdenInput = {
+  modoCaptura?: "automatic" | "automatic_async";
   // Siempre calculado por el backend, nunca tomado del frontend.
   total: string;
   referenciaExterna: string;
@@ -32,6 +33,8 @@ export type OrdenMP = {
   total_amount?: string;
   total_paid_amount?: string;
   currency?: string;
+  country_code?: string;
+  last_updated_date?: string;
   user_id?: string | number;
 
   transactions?: {
@@ -41,6 +44,10 @@ export type OrdenMP = {
       status_detail?: string;
       amount?: string;
       paid_amount?: string;
+      payment_method?: {
+        redirect_url?: string;
+        transaction_security?: { url?: string; type?: string; status?: string };
+      };
     }>;
   };
 };
@@ -48,6 +55,7 @@ export type OrdenMP = {
 // El servicio de negocio debe conservar la operación y consultar su
 // resultado ante este error; nunca asumir que no hubo cobro.
 export class ErrorOrdersMP extends ServiceUnavailableException {
+  readonly rechazadoDefinitivo: boolean;
   constructor(
     public readonly httpProveedor: number | null,
   ) {
@@ -56,6 +64,10 @@ export class ErrorOrdersMP extends ServiceUnavailableException {
         ? "No se pudo confirmar la respuesta de Mercado Pago."
         : `Mercado Pago respondió HTTP ${httpProveedor}.`,
     );
+    // Un timeout, conflicto de idempotencia, 429, 5xx o respuesta incompleta
+    // nunca demuestra ausencia de cobro.
+    this.rechazadoDefinitivo = httpProveedor !== null &&
+      [400, 401, 403, 404, 405, 422].includes(httpProveedor);
   }
 }
 
@@ -94,6 +106,8 @@ export class MercadoPagoOrdersService {
     const payload = {
       type: "online",
       processing_mode: "automatic",
+      capture_mode: datos.modoCaptura ?? "automatic",
+      currency: "MXN",
       total_amount: datos.total,
       external_reference: datos.referenciaExterna,
 
@@ -118,6 +132,9 @@ export class MercadoPagoOrdersService {
               type: datos.tipoMetodoPago,
               token: datos.token,
               installments: datos.cuotas,
+              ...(datos.modoCaptura === "automatic_async" ? {
+                transaction_security: { validation: "on_fraud_risk" },
+              } : {}),
             },
           },
         ],
@@ -204,6 +221,37 @@ export class MercadoPagoOrdersService {
       throw new ErrorOrdersMP(respuesta.status);
     }
 
-    return resultado as OrdenMP;
+    const orden = resultado as Record<string, unknown>;
+    // No propagar tokens ni otros datos personales devueltos por el proveedor.
+    return {
+      id: resultado.id,
+      status: resultado.status,
+      status_detail: typeof orden.status_detail === "string" ? orden.status_detail : undefined,
+      external_reference: typeof orden.external_reference === "string" ? orden.external_reference : undefined,
+      total_amount: typeof orden.total_amount === "string" ? orden.total_amount : undefined,
+      total_paid_amount: typeof orden.total_paid_amount === "string" ? orden.total_paid_amount : undefined,
+      currency: typeof orden.currency === "string" ? orden.currency : undefined,
+      country_code: typeof orden.country_code === "string" ? orden.country_code : undefined,
+      user_id: typeof orden.user_id === "string" || typeof orden.user_id === "number" ? orden.user_id : undefined,
+      last_updated_date: typeof orden.last_updated_date === "string" ? orden.last_updated_date : undefined,
+      transactions: this.extraerAutenticacion(orden.transactions),
+    };
+  }
+
+  private extraerAutenticacion(valor: unknown): OrdenMP["transactions"] {
+    if (!valor || typeof valor !== "object" || !("payments" in valor) || !Array.isArray(valor.payments)) return;
+    return { payments: valor.payments.map((p: unknown) => {
+      if (!p || typeof p !== "object" || !("payment_method" in p)) return {};
+      const metodo = p.payment_method;
+      if (!metodo || typeof metodo !== "object") return {};
+      const seguridad = "transaction_security" in metodo ? metodo.transaction_security : null;
+      return { payment_method: {
+        redirect_url: "redirect_url" in metodo && typeof metodo.redirect_url === "string" ? metodo.redirect_url : undefined,
+        transaction_security: seguridad && typeof seguridad === "object" ? {
+        url: "url" in seguridad && typeof seguridad.url === "string" ? seguridad.url : undefined,
+        type: "type" in seguridad && typeof seguridad.type === "string" ? seguridad.type : undefined,
+        status: "status" in seguridad && typeof seguridad.status === "string" ? seguridad.status : undefined,
+      } : undefined } };
+    }) };
   }
 }
