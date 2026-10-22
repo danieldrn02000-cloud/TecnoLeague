@@ -9,6 +9,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "ts-node prisma/seed.ts",
+    "db:repair-sequences": "ts-node prisma/repair-sequences.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {
@@ -27,7 +28,8 @@
     "graphql-ws": "^6.2.2",
     "mercadopago": "^3.6.1",
     "reflect-metadata": "0.2.2",
-    "rxjs": "7.8.2"
+    "rxjs": "7.8.2",
+    "sharp": "0.35.5"
   },
   "devDependencies": {
     "@types/node": "22.19.1",

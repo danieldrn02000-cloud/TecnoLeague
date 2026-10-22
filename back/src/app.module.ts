@@ -24,6 +24,7 @@ import { BackOfficeSubscriptionGuard } from "./backoffice-subscription.guard";
 import { SubscriptionsResolver } from "./subscription.resolver";
 import { EventosService } from "./eventos.service";
 import type { RequestContext } from "./types";
+import { ImagenesController } from "./imagenes.controller";
 
 import {
   AuthResolver,
@@ -112,6 +113,6 @@ import {
     BackOfficeSubscriptionGuard,
     MercadoPagoOrdersService,
   ],
-  controllers: [PagosController],
+  controllers: [PagosController, ImagenesController],
 })
 export class AppModule {}

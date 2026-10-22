@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "astro dev --host 127.0.0.1 --port 5173",
+    "dev": "astro dev --host 0.0.0.0 --port 5173",
     "build": "astro check && astro build",
     "test": "vitest run",
-    "preview": "astro preview --host 127.0.0.1 --port 5173"
+    "preview": "astro preview --host 0.0.0.0 --port 5173"
   },
   "dependencies": {
     "@astrojs/netlify": "^8.2.6",

@@ -9,6 +9,7 @@ import { GraphQLError } from "graphql";
 import { PrismaService } from "./prisma.service";
 import { fallo } from "./tienda.service";
 import { EventosService } from "./eventos.service";
+import { errorCatalogo } from "./catalogo-error";
 
 const incluirPedido = {
   detalles: { include: { producto: { include: { categoria: true } } } },
@@ -612,13 +613,7 @@ export class AdminService {
 
     return categoria;
     } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2002"
-      ) {
-        fallo("Ya existe una categoría con ese nombre.");
-      }
-      throw error;
+      errorCatalogo(error, "categoría");
     }
   }
 
@@ -643,19 +638,7 @@ export class AdminService {
 
     return categoria;
     } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2002"
-      ) {
-        fallo("Ya existe una categoría con ese nombre.");
-      }
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2025"
-      ) {
-        fallo("La categoría no existe.");
-      }
-      throw error;
+      errorCatalogo(error, "categoría");
     }
   }
 
