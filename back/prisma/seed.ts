@@ -2,6 +2,8 @@ import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { randomBytes, scrypt as scryptCallback } from "node:crypto";
 import catalogo from "./catalogo.json";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 const db = new PrismaClient();
 async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString("base64url");
@@ -62,12 +64,7 @@ async function seed() {
       create: producto,
     });
   }
-  for (const tabla of ["categorias", "usuarios", "productos"]) {
-    // Nombres internos constantes, nunca datos recibidos del usuario.
-    await db.$executeRawUnsafe(
-      `SELECT setval(pg_get_serial_sequence('${tabla}', 'id'), COALESCE((SELECT MAX(id) FROM ${tabla}), 1), true)`,
-    );
-  }
+  await db.$executeRawUnsafe(readFileSync(join(__dirname, "repair-sequences.sql"), "utf8"));
   await prepararAdmin();
   console.log(
     "Catálogo y cliente de demostración preparados. Los pedidos y cambios existentes se conservan.",

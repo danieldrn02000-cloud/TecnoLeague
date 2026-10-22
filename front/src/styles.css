@@ -1307,6 +1307,12 @@ tr:last-child td {
   grid-template-columns: 1fr 1fr;
   gap: 20px;
 }
+.product-image-field {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;

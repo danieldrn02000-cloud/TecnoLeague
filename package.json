@@ -17,6 +17,7 @@
     "db:generate": "npm run db:generate -w back",
     "db:migrate": "npm run db:migrate -w back",
     "db:seed": "npm run db:seed -w back",
+    "db:repair-sequences": "npm run db:repair-sequences -w back",
     "db:studio": "npm run db:studio -w back",
     "test:api": "node scripts/test-api.mjs",
     "test:subscriptions": "npm run build -w back && node --test back/test/*.test.cjs",

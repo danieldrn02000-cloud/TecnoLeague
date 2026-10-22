@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient, type Client } from "graphql-ws";
+import { backOfficeUrl } from "../lib/backoffice-url";
 //Este archivo centraliza una conexion por panel motnado.
 //Solicitud del ticket
 //Escucha de backOfficeActualizado
@@ -48,13 +49,14 @@ class FalloTicket extends Error {
   }
 }
 
-async function solicitarTicket() {
+async function solicitarTicket(signal: AbortSignal) {
   const response = await fetch("/api/admin/subscription-ticket", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     cache: "no-store",
     body: "{}",
+    signal,
   });
   const payload = (await response.json().catch(() => null)) as
     | { ticket?: string; expiraEn?: string; error?: string }
@@ -66,34 +68,6 @@ async function solicitarTicket() {
     );
   }
   return payload.ticket;
-}
-
-function urlWebSocket() {
-  const configured = import.meta.env.PUBLIC_BACKOFFICE_WS_URL;
-  if (!configured && import.meta.env.DEV) {
-    return "ws://127.0.0.1:4000/graphql";
-  }
-  if (!configured) {
-    throw new Error(
-      "Falta configurar PUBLIC_BACKOFFICE_WS_URL para el BackOffice.",
-    );
-  }
-  const url = new URL(configured);
-  if (url.protocol !== "ws:" && url.protocol !== "wss:") {
-    throw new Error("PUBLIC_BACKOFFICE_WS_URL debe usar ws:// o wss://.");
-  }
-  if (window.location.protocol === "https:" && url.protocol !== "wss:") {
-    throw new Error("El BackOffice requiere wss:// cuando el sitio usa HTTPS.");
-  }
-  if (
-    !import.meta.env.DEV &&
-    ["localhost", "127.0.0.1", "::1"].includes(url.hostname)
-  ) {
-    throw new Error(
-      "PUBLIC_BACKOFFICE_WS_URL debe apuntar al backend público en producción.",
-    );
-  }
-  return url.toString();
 }
 
 function publicarEventos(eventos: EventoBackOffice[]) {
@@ -108,12 +82,17 @@ function publicarReconectado() {
 
 export function useBackOfficeEvents(avisar: (mensaje: string) => void) {
   const [estado, setEstado] = useState<EstadoConexion>("connecting");
+  const [detalle, setDetalle] = useState("");
+  const [intento, setIntento] = useState(0);
   const avisarRef = useRef(avisar);
   useEffect(() => {
     avisarRef.current = avisar;
   }, [avisar]);
 
   useEffect(() => {
+    const abort = new AbortController();
+    setDetalle("");
+    setEstado("connecting");
     let cliente: Client | undefined;
     let activo = true;
     let terminal = false;
@@ -122,13 +101,17 @@ export function useBackOfficeEvents(avisar: (mensaje: string) => void) {
     let cierresConsecutivos = 0;
     let ticketStatus: number | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let terminarEspera: (() => void) | undefined;
     let ultimoAviso = 0;
     const eventosPendientes = new Map<string, EventoBackOffice>();
     const vistos = new Map<string, true>();
 
     const cerrarPorPermiso = (status: number) => {
+      if (!activo) return;
       terminal = true;
       setEstado("denied");
+      setDetalle(status === 401 ? "La sesión expiró. Inicia sesión de nuevo." : "La cuenta ya no tiene acceso administrativo.");
       if (status === 401) {
         window.dispatchEvent(new Event("tl-sesion-invalida"));
       } else {
@@ -154,21 +137,25 @@ export function useBackOfficeEvents(avisar: (mensaje: string) => void) {
 
     try {
       cliente = createClient({
-        url: urlWebSocket(),
+        url: backOfficeUrl(import.meta.env.PUBLIC_BACKOFFICE_WS_URL, import.meta.env.DEV, window.location.href),
         lazy: true,
         retryAttempts: 5,
         retryWait: async (reintentos) => {
           const espera = Math.min(1000 * 2 ** reintentos, 15000);
-          await new Promise((resolve) => setTimeout(resolve, espera));
+          await new Promise<void>((resolve) => {
+            terminarEspera = resolve;
+            retryTimer = setTimeout(resolve, espera);
+          });
         },
         shouldRetry: () =>
-          !terminal && ticketStatus !== 401 && ticketStatus !== 403,
+          activo && !terminal && ticketStatus !== 401 && ticketStatus !== 403,
         connectionParams: async () => {
           try {
-            const ticket = await solicitarTicket();
+            const ticket = await solicitarTicket(AbortSignal.any([abort.signal, AbortSignal.timeout(15000)]));
             ticketStatus = undefined;
             return { ticket };
           } catch (error) {
+            if (activo && error instanceof Error) setDetalle(error.message);
             if (error instanceof FalloTicket) {
               ticketStatus = error.status;
               if (error.status === 401 || error.status === 403) {
@@ -188,6 +175,7 @@ export function useBackOfficeEvents(avisar: (mensaje: string) => void) {
             if (!activo || terminal) return;
             cierresConsecutivos = 0;
             setEstado("connected");
+            setDetalle("");
             if (conectadoAntes || conexionInterrumpida) {
               publicarReconectado();
             }
@@ -214,6 +202,7 @@ export function useBackOfficeEvents(avisar: (mensaje: string) => void) {
         Record<string, never>
       >({ query: OPERACION }, {
         next: (resultado) => {
+          if (!activo) return;
           if (resultado.errors?.length) {
             const code = resultado.errors.find(
               (error) =>
@@ -224,6 +213,7 @@ export function useBackOfficeEvents(avisar: (mensaje: string) => void) {
             else if (code === "FORBIDDEN") cerrarPorPermiso(403);
             else {
               setEstado("disconnected");
+              setDetalle("El backend rechazó la operación de actualización en vivo.");
               avisarRef.current(
                 "No se pudo procesar una actualización del BackOffice.",
               );
@@ -252,7 +242,8 @@ export function useBackOfficeEvents(avisar: (mensaje: string) => void) {
           else if (code === "FORBIDDEN") cerrarPorPermiso(403);
           else if (activo) {
             setEstado("disconnected");
-            avisarRef.current("La suscripción administrativa encontró un error.");
+            setDetalle((actual) => actual || "No se pudo conectar con el WebSocket de NestJS. Verifica el servidor y PUBLIC_BACKOFFICE_WS_URL.");
+            avisarRef.current("No se pudo mantener la conexión en vivo. Comprueba que NestJS esté activo y que el destino WebSocket sea accesible desde esta computadora.");
           }
         },
         complete: () => {
@@ -262,25 +253,32 @@ export function useBackOfficeEvents(avisar: (mensaje: string) => void) {
 
       return () => {
         activo = false;
+        abort.abort();
         if (timer) clearTimeout(timer);
+        if (retryTimer) clearTimeout(retryTimer);
+        terminarEspera?.();
         eventosPendientes.clear();
         subscription();
         void cliente?.dispose();
       };
-    } catch {
+    } catch (error) {
       setEstado("disconnected");
+      setDetalle(error instanceof Error ? error.message : "Destino WebSocket inválido.");
       avisarRef.current(
-        "No se pudo configurar el destino WebSocket del BackOffice.",
+        error instanceof Error ? error.message : "No se pudo configurar el destino WebSocket del BackOffice.",
       );
       return () => {
         activo = false;
+        abort.abort();
         if (timer) clearTimeout(timer);
+        if (retryTimer) clearTimeout(retryTimer);
+        terminarEspera?.();
         void cliente?.dispose();
       };
     }
-  }, []);
+  }, [intento]);
 
-  return estado;
+  return { estado, detalle, reintentar: () => setIntento((actual) => actual + 1) };
 }
 
 export function useBackOfficeRefresh(

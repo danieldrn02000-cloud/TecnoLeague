@@ -19,6 +19,7 @@ import {
   useBackOfficeRefresh,
 } from "../hooks/useBackOfficeEvents";
 import { Cargando, ErrorCarga, Imagen, Modal } from "../components/ui";
+import { ProductImageField } from "../components/ProductImageField";
 import type { Categoria, PaginaProductos, Producto } from "../types";
 const CONSULTA = `query Inventario{productos(limite:100){total items{${PRODUCTO}}} categorias{id nombre}}`;
 type SeccionAdmin =
@@ -71,7 +72,7 @@ export function Admin({ avisar }: { avisar: (s: string) => void }) {
 
 function PanelAdmin({ avisar }: { avisar: (s: string) => void }) {
   const [seccion, setSeccion] = useState<SeccionAdmin>("dashboard");
-  const estadoConexion = useBackOfficeEvents(avisar);
+  const { estado: estadoConexion, detalle: detalleConexion, reintentar: reconectar } = useBackOfficeEvents(avisar);
   const { data } = useQuery<{
     usuarioActual: { nombre: string; email: string };
   }>("query AdminIdentidad{usuarioActual{nombre email}}");
@@ -127,6 +128,12 @@ function PanelAdmin({ avisar }: { avisar: (s: string) => void }) {
                     : "Desconectado / Error"}
           </span>
         </header>
+        {detalleConexion && estadoConexion !== "connected" && (
+          <div className="form-error" role="status">
+            {detalleConexion}{" "}
+            {estadoConexion === "disconnected" && <button type="button" className="btn btn-secondary" onClick={reconectar}>Reconectar</button>}
+          </div>
+        )}
         {seccion === "dashboard" && (
           <DashboardAdmin cambiarSeccion={setSeccion} />
         )}
@@ -1779,10 +1786,11 @@ function Editor({
   guardado: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [subiendoImagen, setSubiendoImagen] = useState(false);
   const [error, setError] = useState("");
   async function guardar(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (busy) return;
+    if (busy || subiendoImagen) return;
     setBusy(true);
     setError("");
     const f = new FormData(e.currentTarget);
@@ -1815,7 +1823,7 @@ function Editor({
     <Modal
       titulo={p ? "Editar producto" : "Nuevo producto"}
       onClose={() => {
-        if (!busy) cerrar();
+        if (!busy && !subiendoImagen) cerrar();
       }}
     >
       {registroCambio && (
@@ -1909,28 +1917,7 @@ function Editor({
                 ))}
               </select>
             </label>
-            <label>
-              Imagen
-              <input
-                name="imagen"
-                required
-                list="imagenes"
-                defaultValue={p?.imagen || "/images/keyboard.jpg"}
-              />
-              <datalist id="imagenes">
-                {[
-                  "laptop.jpg",
-                  "gpu.png",
-                  "ram.jpg",
-                  "keyboard.jpg",
-                  "headphones.jpg",
-                  "controller.jpg",
-                  "controller-white.jpg",
-                ].map((s) => (
-                  <option key={s} value={`/images/${s}`} />
-                ))}
-              </datalist>
-            </label>
+            <ProductImageField initialImage={p?.imagen} disabled={busy} onUploading={setSubiendoImagen} />
           </div>
           <label>
             Descripción
@@ -1961,12 +1948,12 @@ function Editor({
           <button
             type="button"
             className="btn btn-secondary"
-            disabled={busy}
+            disabled={busy || subiendoImagen}
             onClick={cerrar}
           >
             Cancelar
           </button>
-          <button className="btn" disabled={busy}>
+          <button className="btn" disabled={busy || subiendoImagen}>
             {busy ? "Guardando…" : "Guardar producto"}
           </button>
         </div>

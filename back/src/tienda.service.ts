@@ -5,6 +5,7 @@ import { GraphQLError } from "graphql";
 import { createHash } from "node:crypto";
 import { PrismaService } from "./prisma.service";
 import { PedidoInput, ProductoInput } from "./types";
+import { errorCatalogo } from "./catalogo-error";
 
 export function fallo(message: string, code = "BAD_USER_INPUT"): never {
   throw new GraphQLError(message, { extensions: { code } });
@@ -130,6 +131,7 @@ export class TiendaService {
       fallo("Revisa la marca y las especificaciones.");
     if (
       !/^\/images\/[a-zA-Z0-9._-]+$/.test(datos.imagen) &&
+      !/^\/images\/uploads\/[a-f0-9-]{36}\.(jpg|png)$/.test(datos.imagen) &&
       !/^https:\/\//.test(datos.imagen)
     )
       fallo("La imagen debe ser /images/archivo o una URL HTTPS.");
@@ -151,7 +153,7 @@ export class TiendaService {
 
   //cambios para las notificaciones de tal manera que se puedan publicar altas, modificaciones y bajas de productos
   async crearProducto(datos: ProductoInput, actorId: number) {
-    const producto = await this.validarProducto(datos);
+    const producto = await this.validarProducto(datos).catch((error) => errorCatalogo(error, "producto"));
     const resultado = await this.db.$transaction(async (tx) => {
       const creado = await tx.producto.create({
         data: producto,
@@ -169,7 +171,7 @@ export class TiendaService {
         });
       }
       return creado;
-    });
+    }).catch((error) => errorCatalogo(error, "producto"));
     await this.eventos.publicarBackOffice({
       entidad: "PRODUCTO",
       entidadId: resultado.id,
