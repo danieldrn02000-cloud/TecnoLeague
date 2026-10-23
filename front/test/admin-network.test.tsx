@@ -39,6 +39,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
@@ -181,17 +182,30 @@ describe("Añadir imagen", () => {
 });
 
 describe("conexión administrativa", () => {
+  const respuestaTicket = () =>
+    Response.json({
+      ticket: "ticket-privado",
+      expiraEn: new Date(Date.now() + 60000).toISOString(),
+    });
   beforeEach(() => {
     vi.stubEnv("PUBLIC_BACKOFFICE_WS_URL", "");
     vi.stubEnv("DEV", true);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async () => respuestaTicket()),
+    );
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    ws.options = null;
+    ws.sink = null;
   });
-  it("agrupa y deduplica eventos; al reconectar recupera datos y al salir libera la conexión", () => {
-    vi.useFakeTimers();
-    const refresh = vi.fn();
-    const reconnect = vi.fn();
+  it("agrupa y deduplica eventos; al reconectar recupera datos y al salir libera la conexión", async () => {
+    const refresh = vi.fn(),
+      reconnect = vi.fn();
     window.addEventListener("tl-backoffice-refresh", refresh);
     window.addEventListener("tl-backoffice-reconnected", reconnect);
     const { result, unmount } = renderHook(() => useBackOfficeEvents(vi.fn()));
+    await waitFor(() => expect(ws.create).toHaveBeenCalledOnce());
+    vi.useFakeTimers();
     act(() => ws.options.on.connected());
     expect(result.current.estado).toBe("connected");
     const evento = {
@@ -208,42 +222,85 @@ describe("conexión administrativa", () => {
     });
     expect(refresh).toHaveBeenCalledOnce();
     expect(refresh.mock.calls[0][0].detail).toHaveLength(1);
-    act(() => {
-      ws.options.on.closed();
-      ws.options.on.connected();
+    act(() => ws.options.on.closed({ code: 1006 }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
     });
+    expect(ws.create).toHaveBeenCalledTimes(2);
+    act(() => ws.options.on.connected());
     expect(reconnect).toHaveBeenCalledOnce();
     unmount();
-    expect(ws.unsubscribe).toHaveBeenCalledOnce();
-    expect(ws.dispose).toHaveBeenCalledOnce();
+    expect(ws.unsubscribe).toHaveBeenCalledTimes(2);
+    expect(ws.dispose).toHaveBeenCalledTimes(2);
     expect(vi.getTimerCount()).toBe(0);
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls)).not.toContain(
+      "ticket-privado",
+    );
     window.removeEventListener("tl-backoffice-refresh", refresh);
     window.removeEventListener("tl-backoffice-reconnected", reconnect);
   });
-  it("solicita un ticket nuevo por conexión y no reintenta ante 403", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          Response.json({ error: "Sin permiso." }, { status: 403 }),
+  it("no abre el socket ni reintenta ante 403", async () => {
+    const fetch = vi
+      .fn()
+      .mockImplementation(async () =>
+        Response.json(
+          { error: "Sin permiso.", code: "FORBIDDEN" },
+          { status: 403 },
         ),
-    );
-    const { result } = renderHook(() => useBackOfficeEvents(vi.fn()));
-    await act(async () => {
-      await expect(ws.options.connectionParams()).rejects.toThrow(
-        "Sin permiso.",
       );
-    });
-    expect(result.current.estado).toBe("denied");
-    expect(ws.options.shouldRetry()).toBe(false);
-    expect(result.current.detalle).toContain("acceso administrativo");
-  });
-  it("permite reconectar manualmente sin mantener el cliente anterior", () => {
+    vi.stubGlobal("fetch", fetch);
     const { result } = renderHook(() => useBackOfficeEvents(vi.fn()));
+    await waitFor(() => expect(result.current.estado).toBe("denied"));
+    expect(ws.create).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(result.current.detalle).toContain("Sin permiso.");
+  });
+  it("permite reconectar manualmente sin mantener el cliente anterior", async () => {
+    const { result } = renderHook(() => useBackOfficeEvents(vi.fn()));
+    await waitFor(() => expect(ws.create).toHaveBeenCalledOnce());
     act(() => result.current.reintentar());
-    expect(ws.create).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(ws.create).toHaveBeenCalledTimes(2));
     expect(ws.unsubscribe).toHaveBeenCalledOnce();
     expect(ws.dispose).toHaveBeenCalledOnce();
+  });
+  it("reintenta un fallo HTTP temporal antes de construir el socket", async () => {
+    const fetch = vi
+      .fn()
+      .mockImplementationOnce(async () =>
+        Response.json(
+          {
+            error: "Base temporalmente no disponible",
+            code: "DATABASE_UNAVAILABLE",
+          },
+          { status: 503 },
+        ),
+      )
+      .mockImplementation(async () => respuestaTicket());
+    vi.stubGlobal("fetch", fetch);
+    const { result } = renderHook(() => useBackOfficeEvents(vi.fn()));
+    await waitFor(() => expect(result.current.estado).toBe("reconnecting"));
+    expect(ws.create).not.toHaveBeenCalled();
+    await waitFor(() => expect(ws.create).toHaveBeenCalledOnce(), {
+      timeout: 3000,
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it("una respuesta tardía no abre un socket después de salir del panel", async () => {
+    let responder!: (value: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(
+        () =>
+          new Promise<Response>((resolve) => {
+            responder = resolve;
+          }),
+      ),
+    );
+    const { unmount } = renderHook(() => useBackOfficeEvents(vi.fn()));
+    unmount();
+    await act(async () => {
+      responder(respuestaTicket());
+    });
+    expect(ws.create).not.toHaveBeenCalled();
   });
 });

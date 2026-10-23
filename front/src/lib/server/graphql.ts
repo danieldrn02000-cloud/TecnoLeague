@@ -14,6 +14,7 @@ export type BackendReply<T> = {
 type BackendOptions = {
   token?: string;
   authBridge?: boolean;
+  requestId?: string;
 };
 
 export async function requestBackend<T>(
@@ -22,6 +23,7 @@ export async function requestBackend<T>(
 ) {
   const headers = new Headers({ "Content-Type": "application/json" });
   if (options.token) headers.set("Authorization", `Bearer ${options.token}`);
+  if (options.requestId) headers.set("X-BackOffice-Request-Id", options.requestId);
   if (options.authBridge && import.meta.env.AUTH_BRIDGE_SECRET) {
     headers.set("x-auth-bridge-secret", import.meta.env.AUTH_BRIDGE_SECRET);
   }

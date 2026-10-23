@@ -25,6 +25,7 @@ import { SubscriptionsResolver } from "./subscription.resolver";
 import { EventosService } from "./eventos.service";
 import type { RequestContext } from "./types";
 import { ImagenesController } from "./imagenes.controller";
+import { idDiagnostico, opcionesBackOfficeWs } from "./backoffice-diagnostics";
 
 import {
   AuthResolver,
@@ -44,7 +45,7 @@ import {
       path: "/graphql",
       graphiql: true,
       introspection: true,
-      subscriptions: { "graphql-ws": { path: "/graphql" } }, //protocolo para subcriptions
+      subscriptions: { "graphql-ws": opcionesBackOfficeWs },
 
       //adaptacion de contexto, motivo:
       //Los guards actuales buscan el token en ctx.req.headers.authorization. Las conexiones envian sus crendciales mediante websockets
@@ -70,6 +71,7 @@ import {
             headers: {
               authorization:
                 typeof authorization === "string" ? authorization : undefined,
+              "x-backoffice-request-id": idDiagnostico(connectionParams?.requestId),
             },
           },
         };

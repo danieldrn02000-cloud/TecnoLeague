@@ -25,7 +25,8 @@
     "test:orders": "npm run build -w back && node --test back/test/orders-api.test.cjs",
     "diagnostico:orden": "node scripts/diagnostico-orden-mp.cjs",
     "checkout:cerrar-rechazo": "node scripts/cerrar-rechazo-orders.cjs",
-    "test:front": "npm run test -w front"
+    "test:front": "npm run test -w front",
+    "test:backoffice": "npm run build -w back && npm run test -w front -- --config vitest.backoffice.config.ts"
   },
   "devDependencies": {
     "concurrently": "9.2.4",

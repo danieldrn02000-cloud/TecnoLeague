@@ -3,6 +3,7 @@ import { GqlExecutionContext } from "@nestjs/graphql";
 import { GraphQLError } from "graphql";
 import { AuthService } from "./auth.service";
 import type { ContextoAutenticado } from "./auth.guard";
+import { errorValidacionBackOffice } from "./backoffice-diagnostics";
 
 //Valida el ticket y comprueba que el usuario sea admin
 //Conserva el acceso mediante bearer para los srcipts existentes
@@ -20,9 +21,16 @@ export class BackOfficeSubscriptionGuard implements CanActivate {
           extensions: { code: "UNAUTHENTICATED" },
         });
       }
-      ctx.usuario = await this.auth.usuarioBackOfficePorTicket(
-        ctx.subscriptionTicket,
-      );
+      try {
+        ctx.usuario = await this.auth.usuarioBackOfficePorTicket(
+          ctx.subscriptionTicket,
+        );
+      } catch (error) {
+        errorValidacionBackOffice(
+          error,
+          ctx.req.headers["x-backoffice-request-id"],
+        );
+      }
       return true;
     }
 

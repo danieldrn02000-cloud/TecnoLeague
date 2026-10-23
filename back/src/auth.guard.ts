@@ -1,13 +1,10 @@
 //valida el Bearer y guarda el usuario autenticado en el contexto de GraphQL
 //si el token falta, está alterado o expiró, lanza un error de autenticación
-import {
-  CanActivate,
-  ExecutionContext,
-  Injectable,
-} from "@nestjs/common";
+import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { GqlExecutionContext } from "@nestjs/graphql";
 import { AuthService } from "./auth.service";
 import type { RequestContext } from "./types";
+import { errorValidacionBackOffice } from "./backoffice-diagnostics";
 
 export type ContextoAutenticado = RequestContext & {
   usuario?: Awaited<ReturnType<AuthService["usuarioActual"]>>;
@@ -21,7 +18,20 @@ export class AuthGuard implements CanActivate {
     const gqlContext = GqlExecutionContext.create(context);
     const ctx = gqlContext.getContext<ContextoAutenticado>();
 
-    ctx.usuario = await this.auth.usuarioActual(ctx);
+    try {
+      ctx.usuario = await this.auth.usuarioActual(ctx);
+    } catch (error) {
+      if (
+        gqlContext.getInfo<{ fieldName: string }>().fieldName ===
+        "crearTicketBackOffice"
+      ) {
+        errorValidacionBackOffice(
+          error,
+          ctx.req.headers["x-backoffice-request-id"],
+        );
+      }
+      throw error;
+    }
 
     return true;
   }

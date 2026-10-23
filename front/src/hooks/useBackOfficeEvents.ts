@@ -1,17 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient, type Client } from "graphql-ws";
 import { backOfficeUrl } from "../lib/backoffice-url";
+import {
+  codigoCierre,
+  diagnosticoBackOffice,
+  FalloTicket,
+  idBackOffice,
+  mensajeCierre,
+  mensajeOperacion,
+  solicitarTicket,
+} from "../lib/backoffice-connection";
 //Este archivo centraliza una conexion por panel motnado.
 //Solicitud del ticket
 //Escucha de backOfficeActualizado
 //Reconexion con espera progresiva
 //Agrupacion de eventos durante 200ms
 export type EntidadBackOffice =
-  | "PEDIDO"
-  | "PRODUCTO"
-  | "INVENTARIO"
-  | "CATEGORIA"
-  | "PAGO";
+  "PEDIDO" | "PRODUCTO" | "INVENTARIO" | "CATEGORIA" | "PAGO";
 
 type EventoBackOffice = {
   eventoId: string;
@@ -22,11 +27,7 @@ type EventoBackOffice = {
 };
 
 type EstadoConexion =
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "disconnected"
-  | "denied";
+  "connecting" | "connected" | "reconnecting" | "disconnected" | "denied";
 
 const EVENTO_REFRESH = "tl-backoffice-refresh";
 const EVENTO_RECONNECTED = "tl-backoffice-reconnected";
@@ -39,36 +40,6 @@ const OPERACION = `subscription BackOfficeEnVivo {
     ocurridoEn
   }
 }`;
-
-class FalloTicket extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-  }
-}
-
-async function solicitarTicket(signal: AbortSignal) {
-  const response = await fetch("/api/admin/subscription-ticket", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-    body: "{}",
-    signal,
-  });
-  const payload = (await response.json().catch(() => null)) as
-    | { ticket?: string; expiraEn?: string; error?: string }
-    | null;
-  if (!response.ok || !payload?.ticket || !payload.expiraEn) {
-    throw new FalloTicket(
-      payload?.error ?? "No se pudo iniciar la conexión administrativa.",
-      response.status,
-    );
-  }
-  return payload.ticket;
-}
 
 function publicarEventos(eventos: EventoBackOffice[]) {
   window.dispatchEvent(
@@ -91,35 +62,66 @@ export function useBackOfficeEvents(avisar: (mensaje: string) => void) {
 
   useEffect(() => {
     const abort = new AbortController();
-    setDetalle("");
-    setEstado("connecting");
-    let cliente: Client | undefined;
     let activo = true;
     let terminal = false;
+    let generacion = 0;
+    let cliente: Client | undefined;
+    let cancelar: (() => void) | undefined;
     let conectadoAntes = false;
     let conexionInterrumpida = false;
-    let cierresConsecutivos = 0;
-    let ticketStatus: number | undefined;
+    let reintentos = 0;
+    let numeroIntento = 0;
+    let requestId = "";
     let timer: ReturnType<typeof setTimeout> | undefined;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let terminarEspera: (() => void) | undefined;
     let ultimoAviso = 0;
     const eventosPendientes = new Map<string, EventoBackOffice>();
     const vistos = new Map<string, true>();
+    setDetalle("");
+    setEstado("connecting");
 
-    const cerrarPorPermiso = (status: number) => {
+    const cerrarConexion = () => {
+      cancelar?.();
+      cancelar = undefined;
+      void cliente?.dispose();
+      cliente = undefined;
+    };
+    const cerrarPorPermiso = (status: number, mensaje?: string) => {
       if (!activo) return;
       terminal = true;
       setEstado("denied");
-      setDetalle(status === 401 ? "La sesión expiró. Inicia sesión de nuevo." : "La cuenta ya no tiene acceso administrativo.");
-      if (status === 401) {
-        window.dispatchEvent(new Event("tl-sesion-invalida"));
-      } else {
-        avisarRef.current("Se perdió el acceso administrativo.");
-      }
-      void cliente?.dispose();
+      setDetalle(
+        `${mensaje || (status === 401 ? "La sesión expiró. Inicia sesión de nuevo." : "La cuenta ya no tiene acceso administrativo.")} Diagnóstico: ${requestId}.`,
+      );
+      if (status === 401) window.dispatchEvent(new Event("tl-sesion-invalida"));
+      else avisarRef.current("Se perdió el acceso administrativo.");
+      cerrarConexion();
     };
-
+    const mostrarErrorOperacion = (
+      errores: readonly { extensions?: { code?: unknown } }[],
+    ) => {
+      const code = errores.find(
+        (e) =>
+          e.extensions?.code === "UNAUTHENTICATED" ||
+          e.extensions?.code === "FORBIDDEN",
+      )?.extensions?.code;
+      if (code === "UNAUTHENTICATED") cerrarPorPermiso(401);
+      else if (code === "FORBIDDEN") cerrarPorPermiso(403);
+      else {
+        terminal = true;
+        setEstado("disconnected");
+        const operationCode = errores[0]?.extensions?.code;
+        setDetalle(
+          `${mensajeOperacion(operationCode)} Diagnóstico: ${requestId}.`,
+        );
+        diagnosticoBackOffice("suscripcion_error", {
+          requestId,
+          codigo:
+            typeof operationCode === "string" ? operationCode : "GRAPHQL_ERROR",
+        });
+        cerrarConexion();
+      }
+    };
     const programarRefresh = () => {
       if (timer) return;
       timer = setTimeout(() => {
@@ -134,151 +136,192 @@ export function useBackOfficeEvents(avisar: (mensaje: string) => void) {
         }
       }, 200);
     };
+    const programarReintento = (mensaje: string) => {
+      if (!activo || terminal || retryTimer) return;
+      conexionInterrumpida = true;
+      setDetalle(`${mensaje} Diagnóstico: ${requestId}.`);
+      if (reintentos >= 5) {
+        terminal = true;
+        setEstado("disconnected");
+        return;
+      }
+      setEstado("reconnecting");
+      const espera = Math.min(1000 * 2 ** reintentos++, 15000);
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined;
+        void conectar();
+      }, espera);
+    };
 
+    let destino: string;
     try {
-      cliente = createClient({
-        url: backOfficeUrl(import.meta.env.PUBLIC_BACKOFFICE_WS_URL, import.meta.env.DEV, window.location.href),
-        lazy: true,
-        retryAttempts: 5,
-        retryWait: async (reintentos) => {
-          const espera = Math.min(1000 * 2 ** reintentos, 15000);
-          await new Promise<void>((resolve) => {
-            terminarEspera = resolve;
-            retryTimer = setTimeout(resolve, espera);
-          });
-        },
-        shouldRetry: () =>
-          activo && !terminal && ticketStatus !== 401 && ticketStatus !== 403,
-        connectionParams: async () => {
-          try {
-            const ticket = await solicitarTicket(AbortSignal.any([abort.signal, AbortSignal.timeout(15000)]));
-            ticketStatus = undefined;
-            return { ticket };
-          } catch (error) {
-            if (activo && error instanceof Error) setDetalle(error.message);
-            if (error instanceof FalloTicket) {
-              ticketStatus = error.status;
-              if (error.status === 401 || error.status === 403) {
-                cerrarPorPermiso(error.status);
-              }
-            }
-            throw error;
-          }
-        },
-        on: {
-          connecting: () => {
-            if (activo && !terminal) {
-              setEstado(conectadoAntes ? "reconnecting" : "connecting");
-            }
-          },
-          connected: () => {
-            if (!activo || terminal) return;
-            cierresConsecutivos = 0;
-            setEstado("connected");
-            setDetalle("");
-            if (conectadoAntes || conexionInterrumpida) {
-              publicarReconectado();
-            }
-            conexionInterrumpida = false;
-            conectadoAntes = true;
-          },
-          closed: () => {
-            if (!activo || terminal) return;
-            conexionInterrumpida = true;
-            cierresConsecutivos += 1;
-            setEstado(cierresConsecutivos >= 5 ? "disconnected" : "reconnecting");
-          },
-          error: () => {
-            if (activo && !terminal) {
-              conexionInterrumpida = true;
-              setEstado("reconnecting");
-            }
-          },
-        },
-      });
-
-      const subscription = cliente.subscribe<
-        { backOfficeActualizado: EventoBackOffice },
-        Record<string, never>
-      >({ query: OPERACION }, {
-        next: (resultado) => {
-          if (!activo) return;
-          if (resultado.errors?.length) {
-            const code = resultado.errors.find(
-              (error) =>
-                error.extensions?.code === "UNAUTHENTICATED" ||
-                error.extensions?.code === "FORBIDDEN",
-            )?.extensions?.code;
-            if (code === "UNAUTHENTICATED") cerrarPorPermiso(401);
-            else if (code === "FORBIDDEN") cerrarPorPermiso(403);
-            else {
-              setEstado("disconnected");
-              setDetalle("El backend rechazó la operación de actualización en vivo.");
-              avisarRef.current(
-                "No se pudo procesar una actualización del BackOffice.",
-              );
-            }
-            return;
-          }
-          const evento = resultado.data?.backOfficeActualizado;
-          if (!evento || vistos.has(evento.eventoId)) return;
-          vistos.set(evento.eventoId, true);
-          if (vistos.size > 500) {
-            const primero = vistos.keys().next().value;
-            if (primero) vistos.delete(primero);
-          }
-          eventosPendientes.set(evento.eventoId, evento);
-          programarRefresh();
-        },
-        error: (errores) => {
-          const code = Array.isArray(errores)
-            ? errores.find(
-                (error) =>
-                  error.extensions?.code === "UNAUTHENTICATED" ||
-                  error.extensions?.code === "FORBIDDEN",
-              )?.extensions?.code
-            : undefined;
-          if (code === "UNAUTHENTICATED") cerrarPorPermiso(401);
-          else if (code === "FORBIDDEN") cerrarPorPermiso(403);
-          else if (activo) {
-            setEstado("disconnected");
-            setDetalle((actual) => actual || "No se pudo conectar con el WebSocket de NestJS. Verifica el servidor y PUBLIC_BACKOFFICE_WS_URL.");
-            avisarRef.current("No se pudo mantener la conexión en vivo. Comprueba que NestJS esté activo y que el destino WebSocket sea accesible desde esta computadora.");
-          }
-        },
-        complete: () => {
-          if (activo && !terminal) setEstado("disconnected");
-        },
-      });
-
-      return () => {
-        activo = false;
-        abort.abort();
-        if (timer) clearTimeout(timer);
-        if (retryTimer) clearTimeout(retryTimer);
-        terminarEspera?.();
-        eventosPendientes.clear();
-        subscription();
-        void cliente?.dispose();
-      };
+      destino = backOfficeUrl(
+        import.meta.env.PUBLIC_BACKOFFICE_WS_URL,
+        import.meta.env.DEV,
+        window.location.href,
+      );
     } catch (error) {
       setEstado("disconnected");
-      setDetalle(error instanceof Error ? error.message : "Destino WebSocket inválido.");
-      avisarRef.current(
-        error instanceof Error ? error.message : "No se pudo configurar el destino WebSocket del BackOffice.",
+      setDetalle(
+        error instanceof Error ? error.message : "Destino WebSocket inválido.",
       );
       return () => {
         activo = false;
         abort.abort();
-        if (timer) clearTimeout(timer);
-        if (retryTimer) clearTimeout(retryTimer);
-        terminarEspera?.();
-        void cliente?.dispose();
       };
     }
+
+    async function conectar() {
+      const actual = ++generacion;
+      const vigente = () => activo && actual === generacion;
+      cerrarConexion();
+      requestId = idBackOffice();
+      numeroIntento += 1;
+      setEstado(
+        conectadoAntes || reintentos > 0 ? "reconnecting" : "connecting",
+      );
+      const inicio = performance.now();
+      try {
+        // Obtener el ticket ANTES de construir el socket en cada intento.
+        // Gestionar aquí los fallos evita rechazos sin manejar en la URL async
+        // de graphql-ws y permite reintentar aunque el ticket HTTP falle.
+        const ticket = await solicitarTicket(
+          AbortSignal.any([abort.signal, AbortSignal.timeout(15000)]),
+          requestId,
+        );
+        if (!vigente()) return;
+        diagnosticoBackOffice("ticket_obtenido", {
+          requestId,
+          intento: numeroIntento,
+          duracionMs: Math.round(performance.now() - inicio),
+        });
+        cliente = createClient({
+          url: destino,
+          lazy: true,
+          retryAttempts: 0, // Cada reconexión pasa por conectar y obtiene otro ticket.
+          connectionAckWaitTimeout: 10000,
+          connectionParams: { ticket, requestId },
+          on: {
+            connected: () => {
+              if (!vigente() || terminal) return;
+              reintentos = 0;
+              setEstado("connected");
+              setDetalle("");
+              diagnosticoBackOffice("ws_conectado", {
+                requestId,
+                intento: numeroIntento,
+              });
+              if (conectadoAntes || conexionInterrumpida) publicarReconectado();
+              conectadoAntes = true;
+              conexionInterrumpida = false;
+            },
+            closed: (evento) => {
+              if (!vigente() || terminal) return;
+              const codigo = codigoCierre(evento);
+              diagnosticoBackOffice("ws_cerrado", {
+                requestId,
+                codigo,
+                intento: numeroIntento,
+              });
+              programarReintento(mensajeCierre(codigo));
+              // También los cierres 1000 inesperados necesitan un ticket nuevo.
+              cerrarConexion();
+            },
+          },
+        });
+        cancelar = cliente.subscribe<{
+          backOfficeActualizado: EventoBackOffice;
+        }>(
+          { query: OPERACION },
+          {
+            next: (resultado) => {
+              if (!vigente() || terminal) return;
+              if (resultado.errors?.length) {
+                mostrarErrorOperacion(resultado.errors);
+                return;
+              }
+              const evento = resultado.data?.backOfficeActualizado;
+              if (!evento || vistos.has(evento.eventoId)) return;
+              vistos.set(evento.eventoId, true);
+              if (vistos.size > 500) {
+                const primero = vistos.keys().next().value;
+                if (primero) vistos.delete(primero);
+              }
+              eventosPendientes.set(evento.eventoId, evento);
+              programarRefresh();
+            },
+            error: (error) => {
+              if (!vigente() || terminal) return;
+              if (Array.isArray(error)) mostrarErrorOperacion(error);
+              else {
+                const codigo = codigoCierre(error);
+                diagnosticoBackOffice("ws_error", {
+                  requestId,
+                  codigo: codigo ?? "WEBSOCKET_ERROR",
+                  intento: numeroIntento,
+                });
+                programarReintento(mensajeCierre(codigo));
+              }
+            },
+            complete: () => {
+              if (!vigente() || terminal || retryTimer) return;
+              setEstado("disconnected");
+              setDetalle(
+                `El backend finalizó la suscripción administrativa. Diagnóstico: ${requestId}.`,
+              );
+            },
+          },
+        );
+      } catch (error) {
+        if (!vigente()) return;
+        const mensaje =
+          error instanceof FalloTicket
+            ? error.message
+            : "No se pudo completar el inicio de la conexión en vivo. Comprueba el backend y el tiempo de espera del ticket.";
+        diagnosticoBackOffice("inicio_error", {
+          requestId,
+          intento: numeroIntento,
+          codigo:
+            error instanceof FalloTicket
+              ? error.code
+              : "CONNECTION_START_ERROR",
+          estado: error instanceof FalloTicket ? error.status : undefined,
+          duracionMs: Math.round(performance.now() - inicio),
+        });
+        if (
+          error instanceof FalloTicket &&
+          (error.status === 401 ||
+            (error.status === 403 && error.code !== "ORIGIN_FORBIDDEN"))
+        ) {
+          cerrarPorPermiso(error.status, error.message);
+        } else if (
+          error instanceof FalloTicket &&
+          error.status >= 400 &&
+          error.status < 500
+        ) {
+          terminal = true;
+          setEstado("disconnected");
+          setDetalle(`${mensaje} Diagnóstico: ${requestId}.`);
+        } else programarReintento(mensaje);
+      }
+    }
+    void conectar();
+    return () => {
+      activo = false;
+      generacion += 1;
+      abort.abort();
+      if (timer) clearTimeout(timer);
+      if (retryTimer) clearTimeout(retryTimer);
+      eventosPendientes.clear();
+      cerrarConexion();
+    };
   }, [intento]);
 
-  return { estado, detalle, reintentar: () => setIntento((actual) => actual + 1) };
+  return {
+    estado,
+    detalle,
+    reintentar: () => setIntento((actual) => actual + 1),
+  };
 }
 
 export function useBackOfficeRefresh(
