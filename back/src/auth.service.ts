@@ -53,6 +53,7 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
+  //verifica datos del usuario
   async registrar(datos: RegistroInput) {
     const nombre = datos.nombre.trim();
     const email = datos.email.trim().toLowerCase();
@@ -69,13 +70,14 @@ export class AuthService {
       fallo("La contraseña debe tener entre 8 y 128 caracteres.", "BAD_USER_INPUT");
     }
 
-    const passwordHash = await this.hashPassword(datos.password);
+    const passwordHash = await this.hashPassword(datos.password); //la contraseña se hashea
+    //genera cliente, si hay error lo muestra en fallo
     try {
       const usuario = await this.db.usuario.create({
         data: { nombre, email, passwordHash, rol: "CLIENTE" },
         select: { id: true, nombre: true, email: true, rol: true },
       });
-      return { token: this.crearToken(usuario.id), usuario };
+      return { token: this.crearToken(usuario.id), usuario };//crea el token del usuario
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -87,11 +89,13 @@ export class AuthService {
     }
   }
 
+  //recibe credenciales input
   async iniciarSesion(datos: CredencialesInput) {
-    const email = datos.email.trim().toLowerCase();
+    const email = datos.email.trim().toLowerCase(); //email a minustculas
     if (!email || datos.password.length > 128) {
       fallo("Correo o contraseña incorrectos.", "UNAUTHENTICATED");
     }
+    //compara datos 
     const usuario = await this.db.usuario.findUnique({ where: { email } });
     const passwordValida = await this.compararPassword(
       datos.password,
@@ -100,44 +104,55 @@ export class AuthService {
     if (!usuario || !passwordValida) {
       fallo("Correo o contraseña incorrectos.", "UNAUTHENTICATED");
     }
+    //si todo sale bien se crea el token de la sesión del cliente
     return {
       token: this.crearToken(usuario.id, usuario.versionSesion),
       usuario: this.publico(usuario),
     };
   }
 
+  //delega esta función a passwordRecoveryService y envia el email
   async solicitarRecuperacion(email: string) {
     return new PasswordRecoveryService(this.db).solicitar(email);
   }
 
+  //tambien se delega este servicio
   async verificarCodigoRecuperacion(solicitudId: string, codigo: string) {
     return new PasswordRecoveryService(this.db).verificar(solicitudId, codigo);
   }
 
+  //REESTABLECIMIENTO DE CONTRASEÑA
   async restablecerPassword(token: string, password: string) {
+    //verifica contrasña
     if (password.length < 8 || password.length > 128) {
       fallo("La contraseña debe tener entre 8 y 128 caracteres.", "BAD_USER_INPUT");
     }
+    //utiliza el servicio inyectado y manda token y la contraseña hasheada como argumentos
     return new PasswordRecoveryService(this.db).restablecer(token, await this.hashPassword(password));
   }
+
 
   async usuarioActual(ctx: RequestContext): Promise<UsuarioPublico> {
     const valor = ctx.req.headers.authorization;
     const header = Array.isArray(valor) ? valor[0] : valor;
     const token = header?.match(/^Bearer\s+(.+)$/i)?.[1];
+    //verifica que haya token
     if (!token) fallo("Inicia sesión para continuar.", "UNAUTHENTICATED");
 
     const { id, versionSesion } = this.verificarToken(token);
+    //busca al usuario
     const usuario = await this.db.usuario.findUnique({
       where: { id },
       select: { id: true, nombre: true, email: true, rol: true, versionSesion: true },
     });
+    //filtra fallos, si todo sale bien regresa el id, nombre, email y rol del usuario
     if (!usuario || usuario.versionSesion !== versionSesion) fallo("La sesión ya no es válida.", "UNAUTHENTICATED");
     return { id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol };
   }
 
-  //genera y valida tickets de 60 segundos , con firma derivada y propósito exclusivo de backOffice
+  //genera y valida tickets de 60 segundos
   crearTicketBackOffice(usuarioId: number) {
+    //obtiene fecha actual y genera el ticket
     const ahora = Math.floor(Date.now() / 1000);
     const claims: BackOfficeTicketClaims = {
       sub: usuarioId,
@@ -148,6 +163,7 @@ export class AuthService {
       iat: ahora,
       exp: ahora + BACKOFFICE_TICKET_TTL_SECONDS,
     };
+    //carga payload, contenido y ticket firmado
     const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
     const contenido = `bo1.${payload}`;
     const ticket = `${contenido}.${this.firmarTicketBackOffice(contenido)}`;
@@ -164,6 +180,7 @@ export class AuthService {
       where: { id: claims.sub },
       select: { id: true, nombre: true, email: true, rol: true },
     });
+    //filtra por sesion valida y rol admin
     if (!usuario) fallo("La sesión ya no es válida.", "UNAUTHENTICATED");
     if (usuario.rol !== "ADMIN") {
       fallo("No tienes permiso para realizar esta operación.", "FORBIDDEN");
@@ -173,6 +190,7 @@ export class AuthService {
 
   private verificarTicketBackOffice(ticket: string): BackOfficeTicketClaims {
     const partes = ticket.split(".");
+
     if (partes.length !== 3 || partes[0] !== "bo1") {
       fallo("El ticket de administración no es válido.", "UNAUTHENTICATED");
     }
@@ -188,6 +206,7 @@ export class AuthService {
     }
 
     let claims: Partial<BackOfficeTicketClaims>;
+    
     try {
       claims = JSON.parse(
         Buffer.from(partes[1], "base64url").toString("utf8"),
@@ -197,6 +216,7 @@ export class AuthService {
     }
 
     const ahora = Math.floor(Date.now() / 1000);
+    
     if (
       !Number.isInteger(claims.sub) ||
       (claims.sub ?? 0) < 1 ||
@@ -248,6 +268,7 @@ export class AuthService {
     const [, algoritmo, n, r, p, salt, hash] = encoded.match(
       /^(scrypt)\$(\d+)\$(\d+)\$(\d+)\$([^$]+)\$([^$]+)$/,
     ) ?? [];
+    
     if (!algoritmo || n !== "16384" || r !== "8" || p !== "1") return false;
     const esperado = Buffer.from(hash, "base64url");
     const recibido = await derivarClave(password, salt);
@@ -256,6 +277,7 @@ export class AuthService {
     );
   }
 
+  //crea token con duracion de 7 dias
   private crearToken(usuarioId: number, versionSesion = 0) {
   return this.jwt.sign(
     { sub: usuarioId, sv: versionSesion },
@@ -275,6 +297,7 @@ export class AuthService {
         fallo("La sesión ya no es válida.", "UNAUTHENTICATED");
       }
       return { id: claims.sub, versionSesion: claims.sv ?? 0 };
+    
     } catch (error) {
       if (error instanceof GraphQLError) throw error;
       if (error instanceof Error && error.name === "TokenExpiredError") {
