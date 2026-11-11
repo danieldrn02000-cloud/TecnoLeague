@@ -203,23 +203,10 @@ export function AuthForm({
 
           {!registro && (
             <div className="auth-options">
-              <label className="auth-check">
-                <input
-                  type="checkbox"
-                  checked={recordar}
-                  onChange={(e) => {
-                    setRecordar(e.target.checked);
-                    if (!e.target.checked) {
-                      try { localStorage.removeItem("tl_email_recordado"); } catch { /* Almacenamiento bloqueado. */ }
-                    }
-                  }}
-                />
-                Recordar mi correo
-              </label>
               <button type="button" className="text-btn" disabled={busy} onClick={() => void recuperar()}>¿Olvidaste tu contraseña?</button>
             </div>
           )}
-          {!registro && <p className="muted text-sm">Solo se recuerda tu correo en este dispositivo. Tu contraseña no se guarda.</p>}
+          
           <button className="btn full" type="submit" disabled={busy}>
             {busy
               ? registro
