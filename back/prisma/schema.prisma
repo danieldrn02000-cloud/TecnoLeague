@@ -70,6 +70,7 @@ model Usuario {
   nombre String
   email String @unique
   passwordHash String? @map("password_hash")
+  versionSesion Int @default(0) @map("version_sesion")
   rol Rol @default(CLIENTE)
   pedidos Pedido[]
   intentos IntentoCompra[]
@@ -184,12 +185,17 @@ model EventoPago {
 model TokenRecuperacion {
   id Int @id @default(autoincrement())
   tokenHash String @unique @map("token_hash")
-  usuarioId Int @map("usuario_id")
-  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  usuarioId Int? @map("usuario_id")
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  email String?
+  codigoHash String? @map("codigo_hash")
+  intentos Int @default(0)
+  verificadoEn DateTime? @map("verificado_en")
   expiraEn DateTime @map("expira_en")
   usadoEn DateTime? @map("usado_en")
   creadoEn DateTime @default(now()) @map("creado_en")
   @@index([usuarioId])
+  @@index([email, creadoEn])
   @@map("tokens_recuperacion")
 }
 

@@ -1,0 +1,9 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { RecuperacionForm } from "../components/RecuperacionForm";
+if (!Astro.cookies.get("tl_reset_token")?.value) return Astro.redirect("/verificar-correo");
+Astro.response.headers.set("Cache-Control", "no-store");
+---
+<Layout title="Recuperación de contraseña">
+  <RecuperacionForm client:load modo="password" />
+</Layout>

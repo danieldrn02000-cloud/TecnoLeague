@@ -17,12 +17,27 @@ export function AuthForm({
   const [recordar, setRecordar] = useState(false);
 
   useEffect(() => {
-    const guardado = localStorage.getItem("tl_email_recordado");
-    if (guardado && !registro) {
-      setEmail(guardado);
-      setRecordar(true);
-    }
+    try {
+      const guardado = localStorage.getItem("tl_email_recordado");
+      if (guardado && !registro) { setEmail(guardado); setRecordar(true); }
+    } catch { /* El acceso sigue funcionando si el navegador bloquea el almacenamiento. */ }
   }, [registro]);
+
+  async function recuperar() {
+    if (busy) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { window.location.assign("/verificar-correo"); return; }
+    setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/auth/recuperacion", {
+        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accion: "solicitar", email: email.trim() }),
+      });
+      const resultado = await response.json();
+      if (!response.ok) { setError(resultado.error ?? "No pudimos enviar el código."); return; }
+      window.location.assign("/verificar-correo");
+    } catch { setError("No pudimos enviar el código. Inténtalo en unos momentos."); }
+    finally { setBusy(false); }
+  }
 
   async function enviar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -69,8 +84,10 @@ export function AuthForm({
       }
       //esta opcion es para recordar
       if (!registro) {
-        if (recordar) localStorage.setItem("tl_email_recordado", datos.email);
-        else localStorage.removeItem("tl_email_recordado");
+        try {
+          if (recordar) localStorage.setItem("tl_email_recordado", datos.email);
+          else localStorage.removeItem("tl_email_recordado");
+        } catch { /* No impedir una sesión válida por un fallo de almacenamiento. */ }
       }
       //indica 
       window.location.replace(next);
@@ -187,20 +204,19 @@ export function AuthForm({
                 <input
                   type="checkbox"
                   checked={recordar}
-                  onChange={(e) => setRecordar(e.target.checked)}
+                  onChange={(e) => {
+                    setRecordar(e.target.checked);
+                    if (!e.target.checked) {
+                      try { localStorage.removeItem("tl_email_recordado"); } catch { /* Almacenamiento bloqueado. */ }
+                    }
+                  }}
                 />
-                Recordar mis datos
+                Recordar mi correo
               </label>
+              <button type="button" className="text-btn" disabled={busy} onClick={() => void recuperar()}>¿Olvidaste tu contraseña?</button>
             </div>
           )}
-
-          {!registro && (
-            <div className="auth-options">
-              <button className="auth-check">
-                ¿Olvidaste tu contraseña?
-              </button>
-            </div>
-          )}
+          {!registro && <p className="muted text-sm">Solo se recuerda tu correo en este dispositivo. Tu contraseña no se guarda.</p>}
           <button className="btn full" type="submit" disabled={busy}>
             {busy
               ? registro

@@ -10,7 +10,9 @@ if (invalid) Astro.cookies.delete("tl_session", { path: "/" });
 const next = safeNext(Astro.url.searchParams.get("next"));
 const reason = Astro.url.searchParams.get("reason");
 const notice =
-  reason === "checkout"
+  reason === "recuperada"
+    ? "Tu contraseña se actualizó. Inicia sesión con la nueva contraseña."
+    : reason === "checkout"
     ? "Inicia sesión para completar tu compra."
     : reason === "pedidos"
       ? "Inicia sesión para consultar tus pedidos."

@@ -276,13 +276,20 @@ type Query {
   adminCategorias: [CategoriaAdmin!]!
 }
 """Operaciones que modifican la base de datos."""
+type SolicitudRecuperacion {
+  solicitudId: String!
+  reintentarEn: Int!
+}
+
 type Mutation {
   """Registra un cliente y devuelve un token para el servidor Astro."""
   registrarUsuario(datos: RegistroInput!): Sesion!
   """Valida credenciales y devuelve un token para el servidor Astro."""
   iniciarSesion(datos: CredencialesInput!): Sesion!
-  """Genera un enlace de recuperación; siempre responde true."""
-  solicitarRecuperacion(email: String!): Boolean!
+  """Envía un código sin revelar si el correo está registrado."""
+  solicitarRecuperacion(email: String!): SolicitudRecuperacion!
+  """Canjea un código válido por un permiso breve para cambiar la contraseña."""
+  verificarCodigoRecuperacion(solicitudId: String!, codigo: String!): String!
   """Cambia la contraseña con un token de recuperación válido."""
   restablecerPassword(token: String!, password: String!): Boolean!
   """Emite un ticket breve, exclusivo de la suscripción administrativa."""

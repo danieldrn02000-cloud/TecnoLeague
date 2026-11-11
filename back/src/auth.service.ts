@@ -1,10 +1,9 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { Prisma, Usuario } from "@prisma/client";
 import { GraphQLError } from "graphql";
 import {
   createHmac,
-  createHash,
   randomBytes,
   scrypt as scryptCallback,
   timingSafeEqual,
@@ -12,6 +11,7 @@ import {
 } from "node:crypto";
 import { PrismaService } from "./prisma.service";
 import { CredencialesInput, RegistroInput, RequestContext } from "./types";
+import { PasswordRecoveryService } from "./password-recovery.service";
 
 const HASH_DE_RELLENO = `scrypt$16384$8$1$${Buffer.alloc(16).toString("base64url")}$${Buffer.alloc(64).toString("base64url")}`;
 const derivarClave = (password: string, salt: string) =>
@@ -48,8 +48,6 @@ function fallo(message: string, code: string): never {
 
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
-
   constructor(
     private readonly db: PrismaService,
     private readonly jwt: JwtService,
@@ -103,120 +101,24 @@ export class AuthService {
       fallo("Correo o contraseña incorrectos.", "UNAUTHENTICATED");
     }
     return {
-      token: this.crearToken(usuario.id),
+      token: this.crearToken(usuario.id, usuario.versionSesion),
       usuario: this.publico(usuario),
     };
   }
 
-  async solicitarRecuperacion(emailEntrada: string) {
-    const email = emailEntrada.trim().toLowerCase();
-    const usuario = await this.db.usuario.findUnique({ where: { email } });
-    if (usuario?.passwordHash) {
-      const token = randomBytes(32).toString("base64url");
-      await this.db.tokenRecuperacion.create({
-        data: {
-          usuarioId: usuario.id,
-          tokenHash: createHash("sha256").update(token).digest("hex"),
-          expiraEn: new Date(Date.now() + 60 * 60 * 1000),
-        },
-      });
-      await this.enviarEnlaceRecuperacion(email, token);
-    }
-    return true;
+  async solicitarRecuperacion(email: string) {
+    return new PasswordRecoveryService(this.db).solicitar(email);
   }
 
-  private async enviarEnlaceRecuperacion(email: string, token: string) {
-    const apiKey = process.env.RESEND_API_KEY?.trim();
-    const from = process.env.PASSWORD_RESET_FROM?.trim();
-    if (!apiKey || !from) {
-      this.logger.error(
-        "Recuperación no disponible: configura RESEND_API_KEY y PASSWORD_RESET_FROM.",
-      );
-      fallo(
-        "El correo de recuperación no está configurado.",
-        "PASSWORD_RESET_EMAIL_NOT_CONFIGURED",
-      );
-    }
-
-    let enlace: URL;
-    try {
-      const base = new URL(
-        process.env.PUBLIC_SITE_URL || "http://127.0.0.1:5173",
-      );
-      if (base.protocol !== "http:" && base.protocol !== "https:") {
-        throw new Error("PUBLIC_SITE_URL debe usar HTTP o HTTPS.");
-      }
-      enlace = new URL("/restablecer-contrasena", base);
-      enlace.searchParams.set("token", token);
-    } catch {
-      this.logger.error("Recuperación no disponible: PUBLIC_SITE_URL no es válido.");
-      fallo(
-        "La dirección pública del sitio no está configurada correctamente.",
-        "PASSWORD_RESET_SITE_URL_INVALID",
-      );
-    }
-
-    let response: Response;
-    try {
-      response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from,
-          to: [email],
-          subject: "Restablece tu contraseña de TecnoLeague",
-          text: [
-            "Recibimos una solicitud para restablecer la contraseña de tu cuenta TecnoLeague.",
-            "",
-            `Abre este enlace para elegir una nueva contraseña: ${enlace.toString()}`,
-            "",
-            "El enlace vence en 1 hora. Si no solicitaste este cambio, ignora este correo.",
-          ].join("\n"),
-          html: `<p>Recibimos una solicitud para restablecer la contraseña de tu cuenta TecnoLeague.</p><p><a href="${enlace.toString()}">Crear una nueva contraseña</a></p><p>El enlace vence en 1 hora. Si no solicitaste este cambio, ignora este correo.</p>`,
-        }),
-        signal: AbortSignal.timeout(15000),
-      });
-    } catch (error) {
-      this.logger.error(
-        `Falló la conexión con Resend: ${error instanceof Error ? error.message : "error desconocido"}`,
-      );
-      fallo("No se pudo enviar el correo de recuperación.", "PASSWORD_RESET_EMAIL_FAILED");
-    }
-
-    if (!response.ok) {
-      this.logger.error(`Resend rechazó el correo (HTTP ${response.status}).`);
-      fallo("No se pudo enviar el correo de recuperación.", "PASSWORD_RESET_EMAIL_FAILED");
-    }
+  async verificarCodigoRecuperacion(solicitudId: string, codigo: string) {
+    return new PasswordRecoveryService(this.db).verificar(solicitudId, codigo);
   }
 
   async restablecerPassword(token: string, password: string) {
     if (password.length < 8 || password.length > 128) {
       fallo("La contraseña debe tener entre 8 y 128 caracteres.", "BAD_USER_INPUT");
     }
-    const registro = await this.db.tokenRecuperacion.findUnique({
-      where: { tokenHash: createHash("sha256").update(token).digest("hex") },
-    });
-    if (!registro || registro.usadoEn || registro.expiraEn < new Date()) {
-      fallo("El enlace no es válido o ya expiró.", "BAD_USER_INPUT");
-    }
-    const passwordHash = await this.hashPassword(password);
-    const usado = await this.db.$transaction(async (tx) => {
-      const marcado = await tx.tokenRecuperacion.updateMany({
-        where: { id: registro.id, usadoEn: null },
-        data: { usadoEn: new Date() },
-      });
-      if (marcado.count !== 1) return false;
-      await tx.usuario.update({
-        where: { id: registro.usuarioId },
-        data: { passwordHash },
-      });
-      return true;
-    });
-    if (!usado) fallo("El enlace no es válido o ya expiró.", "BAD_USER_INPUT");
-    return true;
+    return new PasswordRecoveryService(this.db).restablecer(token, await this.hashPassword(password));
   }
 
   async usuarioActual(ctx: RequestContext): Promise<UsuarioPublico> {
@@ -225,13 +127,13 @@ export class AuthService {
     const token = header?.match(/^Bearer\s+(.+)$/i)?.[1];
     if (!token) fallo("Inicia sesión para continuar.", "UNAUTHENTICATED");
 
-    const id = this.verificarToken(token);
+    const { id, versionSesion } = this.verificarToken(token);
     const usuario = await this.db.usuario.findUnique({
       where: { id },
-      select: { id: true, nombre: true, email: true, rol: true },
+      select: { id: true, nombre: true, email: true, rol: true, versionSesion: true },
     });
-    if (!usuario) fallo("La sesión ya no es válida.", "UNAUTHENTICATED");
-    return usuario;
+    if (!usuario || usuario.versionSesion !== versionSesion) fallo("La sesión ya no es válida.", "UNAUTHENTICATED");
+    return { id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol };
   }
 
   //genera y valida tickets de 60 segundos , con firma derivada y propósito exclusivo de backOffice
@@ -354,24 +256,25 @@ export class AuthService {
     );
   }
 
-  private crearToken(usuarioId: number) {
+  private crearToken(usuarioId: number, versionSesion = 0) {
   return this.jwt.sign(
-    { sub: usuarioId },
+    { sub: usuarioId, sv: versionSesion },
     { expiresIn: "7d" },
   );
 }
 
-  private verificarToken(token: string): number {
+  private verificarToken(token: string): { id: number; versionSesion: number } {
     try {
-      const claims = this.jwt.verify<{ sub: number; exp: number }>(token);
+      const claims = this.jwt.verify<{ sub: number; exp: number; sv?: number }>(token);
       if (
         !Number.isInteger(claims.sub) || claims.sub < 1 ||
         !Number.isInteger(claims.exp) ||
-        claims.exp <= Math.floor(Date.now() / 1000)
+        claims.exp <= Math.floor(Date.now() / 1000) ||
+        !Number.isInteger(claims.sv ?? 0) || (claims.sv ?? 0) < 0
       ) {
         fallo("La sesión ya no es válida.", "UNAUTHENTICATED");
       }
-      return claims.sub;
+      return { id: claims.sub, versionSesion: claims.sv ?? 0 };
     } catch (error) {
       if (error instanceof GraphQLError) throw error;
       if (error instanceof Error && error.name === "TokenExpiredError") {

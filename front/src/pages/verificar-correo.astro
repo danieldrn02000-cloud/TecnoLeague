@@ -1,0 +1,10 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { RecuperacionForm } from "../components/RecuperacionForm";
+const codigoEnviado = !!Astro.cookies.get("tl_reset_challenge")?.value;
+const email = Astro.cookies.get("tl_reset_email")?.value ?? "";
+Astro.response.headers.set("Cache-Control", "no-store");
+---
+<Layout title="Verifica tu correo">
+  <RecuperacionForm client:load modo="codigo" codigoEnviado={codigoEnviado} emailInicial={email} />
+</Layout>

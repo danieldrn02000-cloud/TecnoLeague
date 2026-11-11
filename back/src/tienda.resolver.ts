@@ -71,6 +71,25 @@ export class AuthResolver {
   }
 
 
+  @Mutation("solicitarRecuperacion") solicitarRecuperacion(@Args("email") email: string, @Context() ctx: RequestContext) {
+    exigirPuenteAuth(ctx);
+    return this.auth.solicitarRecuperacion(email);
+  }
+
+  @Mutation("verificarCodigoRecuperacion") verificarCodigoRecuperacion(
+    @Args("solicitudId") solicitudId: string, @Args("codigo") codigo: string, @Context() ctx: RequestContext,
+  ) {
+    exigirPuenteAuth(ctx);
+    return this.auth.verificarCodigoRecuperacion(solicitudId, codigo);
+  }
+
+  @Mutation("restablecerPassword") restablecerPassword(
+    @Args("token") token: string, @Args("password") password: string, @Context() ctx: RequestContext,
+  ) {
+    exigirPuenteAuth(ctx);
+    return this.auth.restablecerPassword(token, password);
+  }
+
   @Query("usuarioActual")
   @UseGuards(AuthGuard)
   usuarioActual(@Context() ctx: RequestContext) {

@@ -28,6 +28,7 @@ test("imágenes: permisos, validación del contenido, almacenamiento y lectura H
       usuario: {
         findUnique: async ({ where }) => ({
           id: where.id,
+          versionSesion: 0,
           rol: where.id === 1 ? "ADMIN" : "CLIENTE",
         }),
       },
