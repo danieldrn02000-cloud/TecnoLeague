@@ -25,13 +25,16 @@ export function AuthForm({
 
   async function recuperar() {
     if (busy) return;
+
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { window.location.assign("/verificar-correo"); return; }
     setBusy(true); setError("");
+    
     try {
       const response = await fetch("/api/auth/recuperacion", {
         method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accion: "solicitar", email: email.trim() }),
       });
+    
       const resultado = await response.json();
       if (!response.ok) { setError(resultado.error ?? "No pudimos enviar el código."); return; }
       window.location.assign("/verificar-correo");
