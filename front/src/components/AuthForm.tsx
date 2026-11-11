@@ -29,6 +29,7 @@ export function AuthForm({
     if (busy) return;
     const form = new FormData(event.currentTarget);
     const password = String(form.get("password") ?? "");
+    
     if (
       registro &&
       password !== String(form.get("confirmPassword") ?? "")
@@ -38,12 +39,15 @@ export function AuthForm({
     }
     setBusy(true);
     setError("");
+    
     const datos: Record<string, string> = {
       email: String(form.get("email") ?? "").trim(),
       password,
     };
+    //obtiene registro
     if (registro) datos.nombre = String(form.get("nombre") ?? "").trim();
 
+    //manda solicitud POST al backend, dependiendo si es registro o no
     try {
       const response = await fetch(
         registro ? "/api/auth/register" : "/api/auth/login",
@@ -54,17 +58,21 @@ export function AuthForm({
           body: JSON.stringify(datos),
         },
       );
+      //convierte la respuesta de json a JS
       const result = (await response.json().catch(() => null)) as
         | { error?: string }
         | null;
+      //obtiene error de respuesta
       if (!response.ok) {
         setError(result?.error ?? "No se pudo validar la cuenta.");
         return;
       }
+      //esta opcion es para recordar
       if (!registro) {
         if (recordar) localStorage.setItem("tl_email_recordado", datos.email);
         else localStorage.removeItem("tl_email_recordado");
       }
+      //indica 
       window.location.replace(next);
     } catch {
       setError("No se pudo conectar con el servidor. Intenta de nuevo.");
@@ -79,6 +87,7 @@ export function AuthForm({
         <a className="auth-back" href="/">
           <span aria-hidden="true">←</span> Volver a la tienda
         </a>
+
         <span className="eyebrow">TECNOLEAGUE / CUENTA</span>
         <h1>{registro ? "Crea tu cuenta." : "Qué bueno verte."}</h1>
         <p>
@@ -87,6 +96,7 @@ export function AuthForm({
             : "Entra para continuar con tu compra y consultar tus pedidos."}
         </p>
       </section>
+      
       <section className="auth-panel panel" aria-labelledby="auth-title">
         <div className="auth-heading">
           <span className="auth-symbol" aria-hidden="true">
@@ -99,6 +109,7 @@ export function AuthForm({
             </h2>
           </div>
         </div>
+
         {notice && <p className="auth-notice">{notice}</p>}
         <form className="auth-form" onSubmit={enviar}>
           {registro && (
@@ -145,6 +156,7 @@ export function AuthForm({
               />
             </span>
           </label>
+
           {registro && (
             <label>
               Confirmar contraseña
@@ -162,11 +174,13 @@ export function AuthForm({
               </span>
             </label>
           )}
+
           {error && (
             <p className="auth-error" role="alert">
               {error}
             </p>
           )}
+
           {!registro && (
             <div className="auth-options">
               <label className="auth-check">
@@ -177,6 +191,14 @@ export function AuthForm({
                 />
                 Recordar mis datos
               </label>
+            </div>
+          )}
+
+          {!registro && (
+            <div className="auth-options">
+              <button className="auth-check">
+                ¿Olvidaste tu contraseña?
+              </button>
             </div>
           )}
           <button className="btn full" type="submit" disabled={busy}>
