@@ -213,6 +213,7 @@ enum EstadoIntento {
 enum ModalidadCheckout{
   REDIRECCION
   ORDERS_API
+  PAYPAL
 }
 
 enum EstadoOperacionCobro{
@@ -247,6 +248,7 @@ model IntentoCompra {
   detalles DetalleIntento[]
   checkoutPayload Json? @map("checkout_payload")
   checkoutUrl String? @map("checkout_url")
+  paypalCapturaIniciadaEn DateTime? @map("paypal_captura_iniciada_en")
   reservaActiva Boolean @default(true) @map("reserva_activa")
   expiraEn DateTime @map("expira_en")
   proximaRevision DateTime @default(now()) @map("proxima_revision")

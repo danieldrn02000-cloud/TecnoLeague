@@ -12,10 +12,13 @@ import {
   CONSULTAR_INTENTO,
   PREPARAR_COMPRA,
   PROCESAR_PAGO,
+  INICIAR_PAYPAL,
   guardarIntento,
 } from "../lib/checkout";
 import { graphql, GraphQLError } from "../api";
 import { Checkout } from "./Checkout";
+import { abrirPayPal } from "../lib/paypal";
+vi.mock("../lib/paypal", async original => ({ ...await original<typeof import("../lib/paypal")>(), abrirPayPal: vi.fn() }));
 
 vi.mock("../api", async (original) => ({
   ...(await original<typeof import("../api")>()),
@@ -99,6 +102,7 @@ function abrir() {
   );
 }
 async function preparar() {
+  fireEvent.click(screen.getByLabelText("Tarjeta con Mercado Pago"));
   const boton = await screen.findByRole("button", {
     name: /Continuar al pago/,
   });
@@ -110,6 +114,7 @@ async function preparar() {
 }
 
 beforeEach(() => {
+  vi.stubEnv("PUBLIC_MP_PUBLIC_KEY", "TEST-checkout");
   vi.clearAllMocks();
   localStorage.clear();
   sessionStorage.clear();
@@ -138,6 +143,13 @@ beforeEach(() => {
       estados.set(nuevo.intentoId, nuevo);
       return { prepararCompra: nuevo };
     }
+    if (query === INICIAR_PAYPAL) {
+      const datos = variables.datos as { claveSolicitud: string };
+      const nuevo = estado(datos.claveSolicitud, { modalidad: "PAYPAL", estado: "EN_PROCESO", operacionId: "op-paypal",
+        estadoOperacion: "VINCULADA", checkoutUrl: "https://www.sandbox.paypal.com/checkoutnow?token=ORDER123" });
+      estados.set(nuevo.intentoId, nuevo);
+      return { iniciarPagoPayPal: nuevo };
+    }
     if (query === PROCESAR_PAGO) {
       const nuevo = await procesar(String(variables.id));
       estados.set(nuevo.intentoId, nuevo);
@@ -146,9 +158,26 @@ beforeEach(() => {
     throw new Error(`Consulta inesperada: ${query}`);
   });
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllEnvs(); });
 
 describe("Checkout dentro del sitio", () => {
+  it("PayPal redirige y conserva la referencia, sin tokenizar ni enviar importes del navegador", async () => {
+    abrir();
+    const boton = await screen.findByRole("button", { name: /Continuar con PayPal/ });
+    await waitFor(() => expect((boton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.submit(boton.closest("form")!);
+    await waitFor(() => expect(abrirPayPal).toHaveBeenCalledWith("https://www.sandbox.paypal.com/checkoutnow?token=ORDER123"));
+    expect(api.mock.calls.some(([q]) => q === PROCESAR_PAGO || q === PREPARAR_COMPRA)).toBe(false);
+    const llamada = api.mock.calls.find(([q]) => q === INICIAR_PAYPAL)!;
+    expect(llamada[1]?.datos).not.toHaveProperty("total");
+    expect(localStorage.getItem(`tl-checkout-${usuario.id}`)).toBeTruthy();
+  });
+  it("permite PayPal sin configurar las claves de Mercado Pago", async () => {
+    vi.stubEnv("PUBLIC_MP_PUBLIC_KEY", ""); abrir();
+    const boton = await screen.findByRole("button", { name: /Continuar con PayPal/ });
+    await waitFor(() => expect((boton as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByLabelText("Tarjeta con Mercado Pago")).toBeNull();
+  });
   it("distingue una solicitud inválida de un rechazo bancario", async () => {
     procesar = async id => estado(id, {
       estado: "RECHAZADO", solicitudRechazada: true, operacionId: "op", estadoOperacion: "FINALIZADA",
@@ -270,7 +299,7 @@ describe("Checkout dentro del sitio", () => {
       2,
     );
     fireEvent.click(screen.getByRole("button", { name: "Volver a intentar" }));
-    await screen.findByRole("button", { name: /Continuar al pago/ });
+    await screen.findByRole("button", { name: /Continuar (al pago|con PayPal)/ });
   });
 
   it("muestra 3DS y solo confirma tras consultar el backend", async () => {

@@ -343,11 +343,13 @@ extend type Mutation {
   prepararCompra(datos: PedidoInput!): EstadoCheckout!
   procesarPago(intentoId: ID!, datosPago: DatosPagoInput!): EstadoCheckout!
   iniciarPago(datos: PedidoInput!): InicioPago!
+  iniciarPagoPayPal(datos: PedidoInput!): EstadoCheckout!
+  confirmarPagoPayPal(intentoId: ID!): EstadoCheckout!
   cancelarIntento(intentoId: ID!): EstadoCheckout!
 }
 
 enum TipoTarjetaMP { credit_card debit_card }
-enum ModalidadCheckout {REDIRECCION ORDERS_API}
+enum ModalidadCheckout {REDIRECCION ORDERS_API PAYPAL}
 enum EstadoOperacionCobro {ENVIADA INCIERTA VINCULADA FINALIZADA}
 
 input IdentificacionPagoInput {

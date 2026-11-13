@@ -45,8 +45,9 @@ con scope **Builds** y un valor para el contexto utilizado (**Production**,
 La clave pública se incorpora al JavaScript del navegador durante el build:
 guardar la variable no cambia un deploy existente. Ejecuta un nuevo deploy
 con build después de configurarla; no publiques de nuevo un artefacto antiguo.
-El build de Netlify se detiene con un mensaje explícito si la variable no está
-disponible, para evitar publicar un formulario de pago sin configurar.
+Sin esa variable no se ofrece el formulario de tarjeta de Mercado Pago. El sitio
+puede desplegarse y usar [PayPal con redirección](PAYPAL_CHECKOUT.md) sin claves
+de Mercado Pago.
 Solo `PUBLIC_MP_PUBLIC_KEY` va al navegador; `MP_ACCESS_TOKEN` y
 `MP_WEBHOOK_SECRET` permanecen en el backend.
 

@@ -10,6 +10,7 @@ import { TiendaService } from "./tienda.service";
 import { JwtModule } from "@nestjs/jwt";
 import { PagosController } from "./pagos.controller";
 import { MercadoPagoOrdersService } from "./mercadopago-orders.service";
+import { PayPalService } from "./paypal.service";
 import {
   AdminResolver,
   CategoriaAdminResolver,
@@ -114,6 +115,7 @@ import {
     BackOfficeSubscriptionsResolver,
     BackOfficeSubscriptionGuard,
     MercadoPagoOrdersService,
+    PayPalService,
   ],
   controllers: [PagosController, ImagenesController],
 })

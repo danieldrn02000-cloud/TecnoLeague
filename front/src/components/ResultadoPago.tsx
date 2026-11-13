@@ -1,5 +1,6 @@
 //Mostrar aprobado, pendiente, rechazado, cancelado o vencido, con las acciones disponibles
 import { intentoTerminado, puedePagarIntento, type EstadoCheckout } from "../lib/checkout";
+import { urlPayPalValida } from "../lib/paypal";
 
 type Props = {
   estado: EstadoCheckout;
@@ -17,8 +18,8 @@ export function ResultadoPago({ estado, ocupado, pausado, error, onConsultar, on
   const aprobado = estado.estado === "CONFIRMADO";
   const reserva = puedePagarIntento(estado);
   const titulos = {
-    INICIADO: reserva ? "Tu compra está preparada" : "Estamos verificando tu pago",
-    EN_PROCESO: estado.autenticacion ? "Autoriza el pago con tu banco" : "Estamos verificando tu pago",
+    INICIADO: estado.modalidad === "PAYPAL" ? "Preparando tu pago con PayPal" : reserva ? "Tu compra está preparada" : "Estamos verificando tu pago",
+    EN_PROCESO: estado.modalidad === "PAYPAL" && estado.checkoutUrl ? "Completa tu pago con PayPal" : estado.autenticacion ? "Autoriza el pago con tu banco" : "Estamos verificando tu pago",
     CONFIRMADO: "Pago aprobado",
     RECHAZADO: estado.solicitudRechazada ? "No se pudo iniciar el pago" : "Pago rechazado",
     CANCELADO: "Pago cancelado",
@@ -30,6 +31,7 @@ export function ResultadoPago({ estado, ocupado, pausado, error, onConsultar, on
       <p>
         {aprobado ? `Tu pedido #${estado.pedidoId} está pagado.`
           : terminado ? "Conservamos tu carrito. Puedes preparar una nueva compra."
+          : estado.modalidad === "PAYPAL" && estado.checkoutUrl ? "Continúa con PayPal para autorizar tu compra. Volverás aquí al terminar."
           : reserva ? "Completa los datos de tu tarjeta para pagar."
           : "Espera la confirmación antes de volver a pagar."}
       </p>
@@ -57,6 +59,9 @@ export function ResultadoPago({ estado, ocupado, pausado, error, onConsultar, on
       )}
 
       <div className="resultado-pago-acciones">
+        {!terminado && estado.modalidad === "PAYPAL" && estado.checkoutUrl && urlPayPalValida(estado.checkoutUrl) && (
+          <a className="btn" href={estado.checkoutUrl}>Continuar con PayPal</a>
+        )}
         {aprobado && <button type="button" className="btn" onClick={onPedidos}>Ver mis pedidos</button>}
         {terminado && !aprobado && <button type="button" className="btn" onClick={onNuevaCompra}>Volver a intentar</button>}
         {(!terminado || error) && (

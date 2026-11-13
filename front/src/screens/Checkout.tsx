@@ -11,6 +11,8 @@ import { useEstadoPago } from "../lib/use-estado-pago";
 import { FormularioTarjeta } from "../components/tarjeta";
 import { ResultadoPago } from "../components/ResultadoPago";
 import type { TarjetaTokenizada } from "../lib/mercadoPago";
+import { INICIAR_PAYPAL } from "../lib/checkout";
+import { abrirPayPal } from "../lib/paypal";
 
 export function Checkout({ currentUser, navegar }: {
   currentUser: AuthUser;
@@ -22,6 +24,8 @@ export function Checkout({ currentUser, navegar }: {
   const { recibir, recuperar } = seguimiento;
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [metodoPago, setMetodoPago] = useState<"PAYPAL" | "MERCADO_PAGO">("PAYPAL");
+  const mercadoPagoDisponible = !!import.meta.env.PUBLIC_MP_PUBLIC_KEY?.trim();
   const [enviado, setEnviado] = useState(false);
   const [verificando, setVerificando] = useState(true);
   const [falloVerificacion, setFalloVerificacion] = useState(false);
@@ -85,17 +89,20 @@ export function Checkout({ currentUser, navegar }: {
       ].filter(Boolean).join(", "),
       renglones: lineas.map(l => ({ productoId: l.producto.id, cantidad: l.cantidad })),
     };
-    const contenido = JSON.stringify(datos);
+    const contenido = JSON.stringify({ datos, metodoPago });
     if (solicitud.current.contenido !== contenido) solicitud.current = { contenido, clave: crypto.randomUUID() };
     bloqueado.current = true;
     setBusy(true);
     setError("");
     try {
       guardarIntento(currentUser.id, solicitud.current.clave);
-      const data = await graphql<{ prepararCompra: EstadoCheckout }>(PREPARAR_COMPRA, {
+      const data = await graphql<{ prepararCompra?: EstadoCheckout; iniciarPagoPayPal?: EstadoCheckout }>(metodoPago === "PAYPAL" ? INICIAR_PAYPAL : PREPARAR_COMPRA, {
         datos: { ...datos, claveSolicitud: solicitud.current.clave },
       });
-      await recibir(data.prepararCompra);
+      const compra = data.iniciarPagoPayPal ?? data.prepararCompra;
+      if (!compra) throw new Error("No se pudo preparar la compra.");
+      await recibir(compra);
+      if (compra.modalidad === "PAYPAL" && compra.checkoutUrl) abrirPayPal(compra.checkoutUrl);
     } catch {
       setError("No pudimos preparar tu compra. Revisa tus datos y vuelve a intentarlo.");
       try {
@@ -183,6 +190,12 @@ export function Checkout({ currentUser, navegar }: {
           <div className="checkout-form panel">
             <h2><Truck size={22} /> Datos de entrega</h2>
           <fieldset disabled={busy || verificando || falloVerificacion || !!seguimiento.referencia}>
+            <fieldset className="checkout-metodos">
+              <legend>¿Cómo quieres pagar?</legend>
+              <label><input type="radio" name="metodoPago" value="PAYPAL" checked={metodoPago === "PAYPAL"} onChange={() => setMetodoPago("PAYPAL")} /> PayPal</label>
+              {mercadoPagoDisponible && <label><input type="radio" name="metodoPago" value="MERCADO_PAGO" checked={metodoPago === "MERCADO_PAGO"} onChange={() => setMetodoPago("MERCADO_PAGO")} /> Tarjeta con Mercado Pago</label>}
+              {metodoPago === "PAYPAL" && <p>Te llevaremos a PayPal para autorizar el pago y luego volverás a la tienda.</p>}
+            </fieldset>
             <label>
               Nombre completo
               <input
@@ -280,7 +293,7 @@ export function Checkout({ currentUser, navegar }: {
           </div>
           <Resumen>
             <button type="submit" className="btn full" disabled={busy || verificando || falloVerificacion || !!seguimiento.referencia}>
-              {busy ? "Preparando…" : "Continuar al pago"} <Check size={18} />
+              {busy ? "Preparando…" : metodoPago === "PAYPAL" ? "Continuar con PayPal" : "Continuar al pago"} <Check size={18} />
             </button>
             <p className="muted text-sm">Revisa tus datos de entrega antes de continuar.</p>
           </Resumen>

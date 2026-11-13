@@ -1,0 +1,22 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { RetornoPago } from "../../components/RetornoPago";
+import { getSessionUser } from "../../lib/server/graphql";
+export const prerender = false;
+Astro.response.headers.set("Cache-Control", "no-store");
+const intentoId = Astro.url.searchParams.get("intento") ?? "";
+const resultado = Astro.url.searchParams.get("resultado");
+const valido = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(intentoId) && ["aprobado", "cancelado"].includes(resultado ?? "");
+const { user, invalid } = await getSessionUser(Astro.cookies.get("tl_session")?.value);
+if (invalid) Astro.cookies.delete("tl_session", { path: "/" });
+const next = `/pago/paypal?intento=${encodeURIComponent(intentoId)}&resultado=${resultado === "cancelado" ? "cancelado" : "aprobado"}`;
+---
+<Layout title="Resultado de tu pago con PayPal">
+  {valido && user ? <RetornoPago client:load intentoId={intentoId} usuarioId={user.id} paypal={resultado === "cancelado" ? "cancelado" : "aprobado"} /> :
+    <main class="panel" style="max-width:680px;margin:60px auto;padding:28px">
+      <h1>Tu pago con PayPal</h1>
+      <p>{valido ? "Inicia sesión con la cuenta que comenzó la compra para consultar el pago." : "No pudimos identificar esta compra. Regresa a la tienda para consultar tus pedidos."}</p>
+      {valido && <a href={`/iniciar-sesion?next=${encodeURIComponent(next)}`}>Iniciar sesión</a>}
+      <p><a href="/">Volver a la tienda</a></p>
+    </main>}
+</Layout>

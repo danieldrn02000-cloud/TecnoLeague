@@ -1,19 +1,38 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { graphql } from "../api";
+import { CANCELAR_INTENTO, CONFIRMAR_PAYPAL, type EstadoCheckout } from "../lib/checkout";
 import { useEstadoPago } from "../lib/use-estado-pago";
 import { ResultadoPago } from "./ResultadoPago";
 
 export function RetornoPago({
   intentoId,
   usuarioId,
+  paypal,
 }: {
   intentoId: string;
   usuarioId: number;
+  paypal?: "aprobado" | "cancelado";
 }) {
   const seguimiento = useEstadoPago(usuarioId);
-  const { recuperar } = seguimiento;
+  const { recuperar, recibir } = seguimiento;
+  const [revision, setRevision] = useState(0);
+  const [confirmando, setConfirmando] = useState(false);
   useEffect(() => {
-    recuperar(intentoId);
-  }, [intentoId, recuperar]);
+    if (!paypal) { recuperar(intentoId); return; }
+    let activo = true;
+    setConfirmando(true);
+    void graphql<{ confirmarPagoPayPal?: EstadoCheckout; cancelarIntento?: EstadoCheckout }>(
+      paypal === "aprobado" ? CONFIRMAR_PAYPAL : CANCELAR_INTENTO, { id: intentoId },
+    ).then(async data => {
+      if (!activo) return;
+      const estado = data.confirmarPagoPayPal ?? data.cancelarIntento;
+      if (estado) await recibir(estado); else recuperar(intentoId);
+    }).catch(() => { if (activo) recuperar(intentoId); })
+      .finally(() => { if (activo) setConfirmando(false); });
+    return () => { activo = false; };
+  }, [intentoId, recuperar, recibir, paypal, revision]);
+
+  const consultar = () => paypal === "aprobado" ? setRevision(n => n + 1) : seguimiento.revisar();
 
   function volver(pantalla: "pedidos" | "carrito") {
     try {
@@ -29,10 +48,10 @@ export function RetornoPago({
       {seguimiento.estado ? (
         <ResultadoPago
           estado={seguimiento.estado}
-          ocupado={seguimiento.consultando}
+          ocupado={confirmando || seguimiento.consultando}
           pausado={seguimiento.pausado}
           error={seguimiento.error}
-          onConsultar={seguimiento.revisar}
+          onConsultar={consultar}
           onCancelar={() => void seguimiento.cancelar()}
           onNuevaCompra={() => volver("carrito")}
           onPedidos={() => volver("pedidos")}
@@ -45,8 +64,8 @@ export function RetornoPago({
           <button
             type="button"
             className="btn"
-            disabled={seguimiento.consultando}
-            onClick={seguimiento.revisar}
+            disabled={confirmando || seguimiento.consultando}
+            onClick={consultar}
           >
             Consultar de nuevo
           </button>

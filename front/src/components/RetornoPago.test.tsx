@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { graphql } from "../api";
-import { CONSULTAR_INTENTO, type EstadoCheckout } from "../lib/checkout";
+import { CONSULTAR_INTENTO, CONFIRMAR_PAYPAL, CANCELAR_INTENTO, type EstadoCheckout } from "../lib/checkout";
 import { RetornoPago } from "./RetornoPago";
 import { useEstadoPago } from "../lib/use-estado-pago";
 
@@ -44,6 +44,26 @@ it("recupera un pago pendiente y muestra su confirmación al consultar, sin cobr
   expect(screen.getByText("Tu pedido #42 está pagado.")).toBeTruthy();
   expect(JSON.parse(localStorage.getItem("tl-carrito-v1")!)[0].cantidad).toBe(1);
   expect(api.mock.calls.every(([query]) => query === CONSULTAR_INTENTO)).toBe(true);
+});
+
+it("el regreso de PayPal solicita la captura al backend y aplica la compra confirmada", async () => {
+  api.mockImplementation(async query => {
+    expect(query).toBe(CONFIRMAR_PAYPAL);
+    return { confirmarPagoPayPal: { ...estado("paypal", true), modalidad: "PAYPAL" } };
+  });
+  render(<RetornoPago intentoId="paypal" usuarioId={7} paypal="aprobado" />);
+  await screen.findByRole("heading", { name: "Pago aprobado" });
+  expect(JSON.parse(localStorage.getItem("tl-carrito-v1")!)[0].cantidad).toBe(1);
+  expect(api.mock.calls[0][1]).toEqual({ id: "paypal" });
+});
+it("cancelar desde PayPal solicita cancelar la compra y nunca llama a captura", async () => {
+  api.mockImplementation(async query => {
+    expect(query).toBe(CANCELAR_INTENTO);
+    return { cancelarIntento: { ...estado("paypal"), estado: "CANCELADO", modalidad: "PAYPAL", estadoOperacion: "FINALIZADA" } };
+  });
+  render(<RetornoPago intentoId="paypal" usuarioId={7} paypal="cancelado" />);
+  await screen.findByRole("heading", { name: "Pago cancelado" });
+  expect(JSON.parse(localStorage.getItem("tl-carrito-v1")!)[0].cantidad).toBe(2);
 });
 
 it("al cambiar de referencia no aplica una respuesta atrasada del intento anterior", async () => {

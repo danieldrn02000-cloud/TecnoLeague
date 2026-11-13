@@ -10,6 +10,16 @@ export class PagosResolver {
     private readonly auth: AuthService,
   ) {}
   //mutatios preparar compra y procesar compra
+  @Mutation("iniciarPagoPayPal")
+  async iniciarPagoPayPal(@Args("datos") datos: PedidoInput, @Context() ctx: RequestContext) {
+    return this.pagos.iniciarPagoPayPal(datos, (await this.auth.usuarioActual(ctx)).id);
+  }
+
+  @Mutation("confirmarPagoPayPal")
+  async confirmarPagoPayPal(@Args("intentoId") intentoId: string, @Context() ctx: RequestContext) {
+    return this.pagos.confirmarPagoPayPal(intentoId, (await this.auth.usuarioActual(ctx)).id);
+  }
+
   @Mutation("prepararCompra")
   async prepararCompra(
     @Args("datos") datos: PedidoInput,

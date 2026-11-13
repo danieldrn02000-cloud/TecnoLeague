@@ -2642,6 +2642,11 @@ tr:last-child td {
   }
 }
 .auth-options{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.checkout-form .checkout-metodos { display: grid; gap: 12px; padding: 16px; margin-bottom: 20px; border: 1px solid #304052; border-radius: 8px; }
+.checkout-metodos legend { padding: 0 6px; font-weight: 700; }
+.checkout-metodos label { display: flex; flex-direction: row; align-items: center; gap: 10px; margin: 0; }
+.checkout-metodos input[type="radio"] { width: 18px; height: 18px; min-height: 0; padding: 0; margin: 0; flex: 0 0 auto; }
+.checkout-metodos p { margin: 0; font-size: 0.92rem; line-height: 1.5; }
 .auth-check{display:flex;flex-direction:row;align-items:center;gap:8px;font-size:.9rem;cursor:pointer}
 .auth-check input{width:auto}
 

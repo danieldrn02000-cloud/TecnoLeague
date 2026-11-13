@@ -11,7 +11,7 @@ export type EstadoCheckout = {
   renglones: RenglonCompra[];
   total: string;
   moneda: string;
-  modalidad: "REDIRECCION" | "ORDERS_API";
+  modalidad: "REDIRECCION" | "ORDERS_API" | "PAYPAL";
   operacionId: string | null;
   estadoOperacion: "ENVIADA" | "INCIERTA" | "VINCULADA" | "FINALIZADA" | null;
   autenticacion: { url: string } | null;
@@ -21,6 +21,8 @@ export const CONSULTAR_INTENTO = `query($id:ID!){estadoIntento(intentoId:$id){${
 export const PREPARAR_COMPRA = `mutation($datos:PedidoInput!){prepararCompra(datos:$datos){${CAMPOS_CHECKOUT}}}`;
 export const PROCESAR_PAGO = `mutation($id:ID!,$pago:DatosPagoInput!){procesarPago(intentoId:$id,datosPago:$pago){${CAMPOS_CHECKOUT}}}`;
 export const CANCELAR_INTENTO = `mutation($id:ID!){cancelarIntento(intentoId:$id){${CAMPOS_CHECKOUT}}}`;
+export const INICIAR_PAYPAL = `mutation($datos:PedidoInput!){iniciarPagoPayPal(datos:$datos){${CAMPOS_CHECKOUT}}}`;
+export const CONFIRMAR_PAYPAL = `mutation($id:ID!){confirmarPagoPayPal(intentoId:$id){${CAMPOS_CHECKOUT}}}`;
 
 export function intentoTerminado(estado: EstadoCheckout) {
   return ["CONFIRMADO", "RECHAZADO", "CANCELADO", "EXPIRADO"].includes(estado.estado);
