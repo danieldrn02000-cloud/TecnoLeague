@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   screen,
@@ -206,9 +207,24 @@ describe("Checkout dentro del sitio", () => {
     expect(preparacion[1]?.datos).toMatchObject({ email: usuario.email });
     expect(api.mock.calls.some(([q]) => q === PROCESAR_PAGO)).toBe(false);
     expect(window.location.href).toBe(url);
-    expect(screen.getAllByText(/Total:/)[0].textContent).toContain(
-      "99.00",
-    );
+    expect(screen.queryByRole("region", { name: "Resultado del pago" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Resumen del pedido" })).toBeTruthy();
+    expect(screen.getAllByText(/99[.,]00/).length).toBeGreaterThan(0);
+  });
+
+  it("muestra ResultadoPago al pulsar Pagar, mientras espera y al recibir la respuesta", async () => {
+    let responder!: (pago: EstadoCheckout) => void;
+    procesar = () => new Promise(resolve => { responder = resolve; });
+    abrir(); await preparar();
+    expect(screen.queryByRole("region", { name: "Resultado del pago" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Pagar 99.00" }));
+    await screen.findByRole("region", { name: "Resultado del pago" });
+    const llamada = api.mock.calls.find(([query]) => query === PROCESAR_PAGO)!;
+    await act(async () => responder(estado(String(llamada[1]?.id), {
+      estado: "CONFIRMADO", pedidoId: 42, operacionId: "op", estadoOperacion: "FINALIZADA",
+    })));
+    await screen.findByRole("heading", { name: "Pago aprobado" });
+    expect(screen.getByRole("region", { name: "Resultado del pago" })).toBeTruthy();
   });
 
   it("envía el tipo de tarjeta, confirma en pantalla y ajusta el carrito una sola vez", async () => {

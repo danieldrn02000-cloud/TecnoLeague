@@ -249,7 +249,7 @@ export function Checkout({
           Reintentar comprobación
         </button>
       )}
-      {estado && (
+      {estado && (enviado || !puedePagarIntento(estado)) && (
         <ResultadoPago
           estado={estado}
           ocupado={busy || seguimiento.consultando}
