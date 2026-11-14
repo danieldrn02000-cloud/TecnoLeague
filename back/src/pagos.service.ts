@@ -10,10 +10,18 @@ import { EstadoIntento, Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import { PrismaService } from "./prisma.service";
 import { fallo } from "./tienda.service";
-import type {DatosPagoInput, PedidoInput} from "./types"
-import { ErrorOrdersMP, MercadoPagoOrdersService, type OrdenMP } from "./mercadopago-orders.service";
+import type { DatosPagoInput, PedidoInput } from "./types";
+import {
+  ErrorOrdersMP,
+  MercadoPagoOrdersService,
+  type OrdenMP,
+} from "./mercadopago-orders.service";
 import { mensajeRechazoPago } from "./mensajes-pago";
-import { PayPalService, ErrorPayPal, type DatosOrdenPayPal } from "./paypal.service";
+import {
+  PayPalService,
+  ErrorPayPal,
+  type DatosOrdenPayPal,
+} from "./paypal.service";
 
 type RecursoMP = {
   id?: string | number;
@@ -21,7 +29,7 @@ type RecursoMP = {
   status?: string;
   status_detail?: string;
   currency?: string;
-  country_code?:string;
+  country_code?: string;
   total_amount?: string;
   total_paid_amount?: string;
   external_reference?: string;
@@ -33,7 +41,11 @@ type RecursoMP = {
   capture_id?: string;
 };
 
-const incluirIntento = { detalles: true, pago: true, operaciones: true } as const;
+const incluirIntento = {
+  detalles: true,
+  pago: true,
+  operaciones: true,
+} as const;
 type Intento = Prisma.IntentoCompraGetPayload<{
   include: typeof incluirIntento;
 }>;
@@ -119,14 +131,22 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     return url.href.replace(/\/$/, "");
   }
 
+  //recibe datos, el id del usuario y la modalidad
   private async reservarCompra(
     datos: PedidoInput,
     usuarioId: number,
     modalidad: "REDIRECCION" | "ORDERS_API" | "PAYPAL",
-  ){
-    const retornoBase = modalidad ==="REDIRECCION" ? this.urlConfigurada("MP_RETURN_BASE_URL"):null;
-    const callback= modalidad === "REDIRECCION" ? this.urlConfigurada("MP_WEBHOOK_URL"):null;
+  ) {
+    const retornoBase =
+      modalidad === "REDIRECCION"
+        ? this.urlConfigurada("MP_RETURN_BASE_URL")
+        : null;
+    const callback =
+      modalidad === "REDIRECCION"
+        ? this.urlConfigurada("MP_WEBHOOK_URL")
+        : null;
 
+    //validaciones de datos del pedido
     if (
       datos.nombre.trim().length < 2 ||
       datos.nombre.length > 120 ||
@@ -140,9 +160,12 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     ) {
       fallo("Revisa los datos de entrega y la clave de la solicitud.");
     }
+
     if (!datos.renglones.length || datos.renglones.length > 50)
       fallo("El carrito debe contener de 1 a 50 renglones.");
     const cantidades = new Map<number, number>();
+
+    //revisa lineas
     for (const linea of datos.renglones) {
       if (
         !Number.isInteger(linea.productoId) ||
@@ -165,9 +188,11 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
       email: datos.email.trim().toLowerCase(),
       direccion: datos.direccion.trim(),
     };
+
     const huella = createHash("sha256")
       .update(JSON.stringify({ usuarioId, ...contacto, renglones }))
       .digest("hex");
+
     const intento = await this.conEventos(
       async (tx, emitir) => {
         // La misma clave concurrente reserva una sola vez, incluso entre instancias.
@@ -197,6 +222,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         const id = datos.claveSolicitud;
         let total = new Prisma.Decimal(0);
         const detalles = [];
+
         for (const [productoId, cantidad] of renglones) {
           const cambio = await tx.producto.updateMany({
             where: { id: productoId, activo: true, stock: { gte: cantidad } },
@@ -207,6 +233,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
           const producto = await tx.producto.findUniqueOrThrow({
             where: { id: productoId },
           });
+
           total = total.add(producto.precio.mul(cantidad));
           detalles.push({
             productoId,
@@ -216,30 +243,36 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
           });
         }
         if (!total.gt(0)) fallo("El importe debe ser positivo.");
+
         const retorno = `${retornoBase}/pago/retorno?intento=${id}`;
-        const payload =modalidad ==="REDIRECCION"? {
-          type: "online",
-          processing_mode: "manual",
-          currency: "MXN",
-          total_amount: total.toFixed(2),
-          external_reference: `TL-INTENTO-${id}`,
-          expiration_time: `PT${MINUTOS_RESERVA}M`,
-          items: detalles.map((d) => ({
-            title: d.nombreProducto,
-            quantity: d.cantidad,
-            unit_price: d.precioUnitario.toFixed(2),
-          })),
-          config: {
-            online: {
-              callback_url: callback,
-              success_url: retorno,
-              failure_url: retorno,
-              pending_url: retorno,
-              auto_return: "all",
-              retries: { allowed: false },
-            },
-          },
-        }: modalidad === "PAYPAL" ? this.paypal.preparar(id, total.toFixed(2), detalles) : undefined;
+        const payload =
+          modalidad === "REDIRECCION"
+            ? {
+                type: "online",
+                processing_mode: "manual",
+                currency: "MXN",
+                total_amount: total.toFixed(2),
+                external_reference: `TL-INTENTO-${id}`,
+                expiration_time: `PT${MINUTOS_RESERVA}M`,
+                items: detalles.map((d) => ({
+                  title: d.nombreProducto,
+                  quantity: d.cantidad,
+                  unit_price: d.precioUnitario.toFixed(2),
+                })),
+                config: {
+                  online: {
+                    callback_url: callback,
+                    success_url: retorno,
+                    failure_url: retorno,
+                    pending_url: retorno,
+                    auto_return: "all",
+                    retries: { allowed: false },
+                  },
+                },
+              }
+            : modalidad === "PAYPAL"
+              ? this.paypal.preparar(id, total.toFixed(2), detalles)
+              : undefined;
 
         const nuevo = await tx.intentoCompra.create({
           data: {
@@ -292,7 +325,6 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     return intento;
   }
 
-  
   async prepararCompra(datos: PedidoInput, usuarioId: number) {
     const intento = await this.reservarCompra(datos, usuarioId, "ORDERS_API");
     return this.consultarIntento(intento.id, usuarioId);
@@ -300,90 +332,185 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
 
   async iniciarPagoPayPal(datos: PedidoInput, usuarioId: number) {
     this.paypal.configuracion();
+    //se crea un intento, se prepara paypal y consulta el inteno
     const intento = await this.reservarCompra(datos, usuarioId, "PAYPAL");
     await this.prepararPayPal(intento.id);
     return this.consultarIntento(intento.id, usuarioId);
   }
 
   private async prepararPayPal(id: string) {
-    const preparada = await this.db.$transaction(async tx => {
+    const preparada = await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM intentos_compra WHERE id = ${id} FOR UPDATE`;
-      const intento = await tx.intentoCompra.findUniqueOrThrow({ where: { id }, include: incluirIntento });
-      if (intento.modalidad !== "PAYPAL" || intento.pago?.idOrdenExterna || !pendientes.includes(intento.estado) || intento.expiraEn <= new Date()) return null;
-      if (!intento.pago || !intento.checkoutPayload) throw new ServiceUnavailableException("Compra incompleta.");
+      const intento = await tx.intentoCompra.findUniqueOrThrow({
+        where: { id },
+        include: incluirIntento,
+      });
+      if (
+        intento.modalidad !== "PAYPAL" ||
+        intento.pago?.idOrdenExterna ||
+        !pendientes.includes(intento.estado) ||
+        intento.expiraEn <= new Date()
+      )
+        return null;
+      if (!intento.pago || !intento.checkoutPayload)
+        throw new ServiceUnavailableException("Compra incompleta.");
       let operacion = intento.operaciones[0];
       if (operacion) {
-        if (operacion.estado === "FINALIZADA" || (operacion.estado === "ENVIADA" && Date.now() - operacion.actualizadoEn.getTime() < 60_000)) return null;
+        if (
+          operacion.estado === "FINALIZADA" ||
+          (operacion.estado === "ENVIADA" &&
+            Date.now() - operacion.actualizadoEn.getTime() < 60_000)
+        )
+          return null;
         // La idempotencia de creación se reutiliza únicamente durante la reserva.
-        operacion = await tx.operacionCobro.update({ where: { id: operacion.id }, data: { estado: "ENVIADA" } });
+        operacion = await tx.operacionCobro.update({
+          where: { id: operacion.id },
+          data: { estado: "ENVIADA" },
+        });
       } else {
-        operacion = await tx.operacionCobro.create({ data: {
-          intentoId: id, claveSolicitud: id, claveIdempotencia: id,
-          huellaSolicitud: createHash("sha256").update(JSON.stringify(intento.checkoutPayload)).digest("hex"),
-        } });
+        operacion = await tx.operacionCobro.create({
+          data: {
+            intentoId: id,
+            claveSolicitud: id,
+            claveIdempotencia: id,
+            huellaSolicitud: createHash("sha256")
+              .update(JSON.stringify(intento.checkoutPayload))
+              .digest("hex"),
+          },
+        });
       }
       return { intento, operacion };
     });
     if (!preparada) return;
     try {
-      const orden = await this.paypal.crear(preparada.intento.checkoutPayload as unknown as DatosOrdenPayPal, preparada.operacion.claveIdempotencia);
+      const orden = await this.paypal.crear(
+        preparada.intento.checkoutPayload as unknown as DatosOrdenPayPal,
+        preparada.operacion.claveIdempotencia,
+      );
       const normalizada = this.paypal.normalizar(orden);
       const checkoutUrl = this.paypal.urlAprobacion(orden);
-      if (!checkoutUrl && !["APPROVED", "COMPLETED"].includes(orden.status)) throw new ErrorPayPal(null, "MISSING_APPROVAL_URL");
-      await this.db.$transaction(async tx => {
+      if (!checkoutUrl && !["APPROVED", "COMPLETED"].includes(orden.status))
+        throw new ErrorPayPal(null, "MISSING_APPROVAL_URL");
+      await this.db.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM intentos_compra WHERE id = ${id} FOR UPDATE`;
-        const intento = await tx.intentoCompra.findUniqueOrThrow({ where: { id }, include: incluirIntento });
+        const intento = await tx.intentoCompra.findUniqueOrThrow({
+          where: { id },
+          include: incluirIntento,
+        });
         this.verificarOrden(normalizada, intento);
-        await tx.pago.update({ where: { intentoId: id }, data: { idOrdenExterna: orden.id, estadoProveedor: orden.status } });
-        await tx.operacionCobro.update({ where: { id: preparada.operacion.id }, data: {
-          idOrdenExterna: orden.id, estado: pendientes.includes(intento.estado) ? "VINCULADA" : "FINALIZADA", estadoProveedor: orden.status,
-        } });
+        await tx.pago.update({
+          where: { intentoId: id },
+          data: { idOrdenExterna: orden.id, estadoProveedor: orden.status },
+        });
+        await tx.operacionCobro.update({
+          where: { id: preparada.operacion.id },
+          data: {
+            idOrdenExterna: orden.id,
+            estado: pendientes.includes(intento.estado)
+              ? "VINCULADA"
+              : "FINALIZADA",
+            estadoProveedor: orden.status,
+          },
+        });
         // Una respuesta tardía de creación no reabre una compra cancelada.
-        if (pendientes.includes(intento.estado)) await tx.intentoCompra.update({ where: { id }, data: { checkoutUrl, estado: "EN_PROCESO", ultimoError: null } });
+        if (pendientes.includes(intento.estado))
+          await tx.intentoCompra.update({
+            where: { id },
+            data: { checkoutUrl, estado: "EN_PROCESO", ultimoError: null },
+          });
       });
     } catch (error) {
       const definitivo = error instanceof ErrorPayPal && error.rechazoCreacion;
-      await this.db.operacionCobro.updateMany({ where: { id: preparada.operacion.id, estado: "ENVIADA" }, data: {
-        estado: definitivo ? "FINALIZADA" : "INCIERTA", estadoProveedor: definitivo ? `HTTP_${error.http}` : undefined,
-      } });
-      this.logger.error(JSON.stringify({ intentoId: id, resultado: "ERROR_PAYPAL_CREAR", http: error instanceof ErrorPayPal ? error.http : undefined,
-        codigo: error instanceof ErrorPayPal ? error.codigo : "VERIFICAR_CONFIGURACION" }));
+      await this.db.operacionCobro.updateMany({
+        where: { id: preparada.operacion.id, estado: "ENVIADA" },
+        data: {
+          estado: definitivo ? "FINALIZADA" : "INCIERTA",
+          estadoProveedor: definitivo ? `HTTP_${error.http}` : undefined,
+        },
+      });
+      this.logger.error(
+        JSON.stringify({
+          intentoId: id,
+          resultado: "ERROR_PAYPAL_CREAR",
+          http: error instanceof ErrorPayPal ? error.http : undefined,
+          codigo:
+            error instanceof ErrorPayPal
+              ? error.codigo
+              : "VERIFICAR_CONFIGURACION",
+        }),
+      );
     }
   }
 
   async confirmarPagoPayPal(id: string, usuarioId: number) {
-    const intento = await this.db.intentoCompra.findFirst({ where: { id, usuarioId }, include: incluirIntento });
-    if (!intento || intento.modalidad !== "PAYPAL") fallo("Compra no encontrada.", "NOT_FOUND");
-    if (!pendientes.includes(intento.estado) || !intento.pago?.idOrdenExterna) return this.consultarIntento(id, usuarioId);
+    const intento = await this.db.intentoCompra.findFirst({
+      where: { id, usuarioId },
+      include: incluirIntento,
+    });
+    if (!intento || intento.modalidad !== "PAYPAL")
+      fallo("Compra no encontrada.", "NOT_FOUND");
+    if (!pendientes.includes(intento.estado) || !intento.pago?.idOrdenExterna)
+      return this.consultarIntento(id, usuarioId);
     const orden = await this.paypal.consultar(intento.pago.idOrdenExterna);
     this.verificarOrden(this.paypal.normalizar(orden), intento);
     if (orden.status === "APPROVED") {
-      const enviar = await this.db.$transaction(async tx => {
+      const enviar = await this.db.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM intentos_compra WHERE id = ${id} FOR UPDATE`;
-        const actual = await tx.intentoCompra.findUniqueOrThrow({ where: { id }, include: incluirIntento });
+        const actual = await tx.intentoCompra.findUniqueOrThrow({
+          where: { id },
+          include: incluirIntento,
+        });
         if (!pendientes.includes(actual.estado)) return false;
         if (actual.paypalCapturaIniciadaEn) {
           const edad = Date.now() - actual.paypalCapturaIniciadaEn.getTime();
           if (edad < 30_000 || edad > 5 * 60_000) return false;
         } else {
-          if (!actual.reservaActiva || actual.expiraEn <= new Date()) return false;
+          if (!actual.reservaActiva || actual.expiraEn <= new Date())
+            return false;
           // Confirmado antes de HTTP: cancelar nunca libera mientras el cobro sea incierto.
-          await tx.intentoCompra.update({ where: { id }, data: { paypalCapturaIniciadaEn: new Date() } });
+          await tx.intentoCompra.update({
+            where: { id },
+            data: { paypalCapturaIniciadaEn: new Date() },
+          });
         }
         return actual.paypalCapturaIniciadaEn ? "reenvio" : "inicial";
       });
       if (enviar) {
         try {
-          await this.paypal.capturar(orden.id, createHash("sha256").update(`paypal-capture:${id}`).digest("hex").slice(0, 32));
+          await this.paypal.capturar(
+            orden.id,
+            createHash("sha256")
+              .update(`paypal-capture:${id}`)
+              .digest("hex")
+              .slice(0, 32),
+          );
         } catch (error) {
-          if (enviar === "inicial" && error instanceof ErrorPayPal && error.http === 422 &&
-              ["INSTRUMENT_DECLINED", "PAYER_CANNOT_PAY", "TRANSACTION_REFUSED"].includes(error.codigo ?? "")) {
-            await this.db.operacionCobro.updateMany({ where: { intentoId: id }, data: {
-              estado: "FINALIZADA", estadoProveedor: "PAYPAL_CAPTURE_DECLINED",
-            } });
+          if (
+            enviar === "inicial" &&
+            error instanceof ErrorPayPal &&
+            error.http === 422 &&
+            [
+              "INSTRUMENT_DECLINED",
+              "PAYER_CANNOT_PAY",
+              "TRANSACTION_REFUSED",
+            ].includes(error.codigo ?? "")
+          ) {
+            await this.db.operacionCobro.updateMany({
+              where: { intentoId: id },
+              data: {
+                estado: "FINALIZADA",
+                estadoProveedor: "PAYPAL_CAPTURE_DECLINED",
+              },
+            });
           }
-          this.logger.warn(JSON.stringify({ intentoId: id, resultado: "PAYPAL_VERIFICAR_CAPTURA", http: error instanceof ErrorPayPal ? error.http : undefined,
-            codigo: error instanceof ErrorPayPal ? error.codigo : undefined }));
+          this.logger.warn(
+            JSON.stringify({
+              intentoId: id,
+              resultado: "PAYPAL_VERIFICAR_CAPTURA",
+              http: error instanceof ErrorPayPal ? error.http : undefined,
+              codigo: error instanceof ErrorPayPal ? error.codigo : undefined,
+            }),
+          );
         }
       }
     }
@@ -393,80 +520,125 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
 
   async procesarPago(id: string, datos: DatosPagoInput, usuarioId: number) {
     if (
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(datos.claveOperacion) ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        datos.claveOperacion,
+      ) ||
       !/^[a-zA-Z0-9_-]{1,200}$/.test(datos.token) ||
       !/^[a-zA-Z0-9_-]{1,80}$/.test(datos.metodoPagoId) ||
       !["credit_card", "debit_card"].includes(datos.tipoMetodoPago) ||
-      !Number.isInteger(datos.cuotas) || datos.cuotas < 1 || datos.cuotas > 36 ||
+      !Number.isInteger(datos.cuotas) ||
+      datos.cuotas < 1 ||
+      datos.cuotas > 36 ||
       (datos.tipoMetodoPago === "debit_card" && datos.cuotas !== 1) ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(datos.email) || datos.email.length > 150 ||
-      (datos.identificacion && (
-        !/^[a-zA-Z0-9_-]{1,30}$/.test(datos.identificacion.tipo) ||
-        !/^[a-zA-Z0-9 .-]{1,40}$/.test(datos.identificacion.numero)
-      ))
-    ) fallo("Revisa los datos de pago y la clave de la operación.");
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(datos.email) ||
+      datos.email.length > 150 ||
+      (datos.identificacion &&
+        (!/^[a-zA-Z0-9_-]{1,30}$/.test(datos.identificacion.tipo) ||
+          !/^[a-zA-Z0-9 .-]{1,40}$/.test(datos.identificacion.numero)))
+    )
+      fallo("Revisa los datos de pago y la clave de la operación.");
 
     this.configuracion();
-    if (!process.env.MP_WEBHOOK_SECRET) fallo("Configura MP_WEBHOOK_SECRET en el backend.");
+    if (!process.env.MP_WEBHOOK_SECRET)
+      fallo("Configura MP_WEBHOOK_SECRET en el backend.");
 
     // Solo se persiste el digest; nunca el token ni el documento. Permite
     // recuperar una solicitud incierta con exactamente el mismo payload.
-    const huella = createHash("sha256").update(JSON.stringify({
-      token: datos.token,
-      metodoPagoId: datos.metodoPagoId,
-      tipoMetodoPago: datos.tipoMetodoPago,
-      cuotas: datos.cuotas,
-      email: datos.email.trim().toLowerCase(),
-      identificacion: datos.identificacion ? {
-        tipo: datos.identificacion.tipo, numero: datos.identificacion.numero,
-      } : null,
-    })).digest("hex");
+    const huella = createHash("sha256")
+      .update(
+        JSON.stringify({
+          token: datos.token,
+          metodoPagoId: datos.metodoPagoId,
+          tipoMetodoPago: datos.tipoMetodoPago,
+          cuotas: datos.cuotas,
+          email: datos.email.trim().toLowerCase(),
+          identificacion: datos.identificacion
+            ? {
+                tipo: datos.identificacion.tipo,
+                numero: datos.identificacion.numero,
+              }
+            : null,
+        }),
+      )
+      .digest("hex");
 
     // El registro se confirma ANTES de hacer HTTP. Dos solicitudes concurrentes
     // nunca pueden iniciar dos cobros para una misma reserva.
-    const preparada = await this.db.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM intentos_compra WHERE id = ${id} FOR UPDATE`;
-      const intento = await tx.intentoCompra.findFirst({
-        where: { id, usuarioId }, include: incluirIntento,
-      });
-      if (!intento) fallo("Intento no encontrado.", "NOT_FOUND");
-      if (intento.modalidad !== "ORDERS_API") fallo("Este intento utiliza el checkout anterior.");
-      const repetida = await tx.operacionCobro.findUnique({
-        where: { claveSolicitud: datos.claveOperacion },
-      });
-      if (repetida && repetida.intentoId !== id) fallo("La clave de operación ya se utilizó.");
-      if (intento.operaciones.length) {
-        const operacion = intento.operaciones[0];
-        // Acotar los reenvíos: no asumir que MP conserva la idempotencia para siempre.
-        const dentroDeVentana = operacion.creadoEn.getTime() > Date.now() - MINUTOS_RESERVA * 60_000;
-        const recuperable = dentroDeVentana && (operacion.estado === "INCIERTA" ||
-          (operacion.estado === "ENVIADA" && operacion.actualizadoEn.getTime() < Date.now() - 60_000));
-        if (repetida && recuperable && !operacion.idOrdenExterna && pendientes.includes(intento.estado)) {
-          if (operacion.huellaSolicitud !== huella) {
-            fallo("La operación incierta requiere la misma clave y los mismos datos de pago. Consulta su resultado.");
+    const preparada = await this.db.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM intentos_compra WHERE id = ${id} FOR UPDATE`;
+        const intento = await tx.intentoCompra.findFirst({
+          where: { id, usuarioId },
+          include: incluirIntento,
+        });
+        if (!intento) fallo("Intento no encontrado.", "NOT_FOUND");
+        if (intento.modalidad !== "ORDERS_API")
+          fallo("Este intento utiliza el checkout anterior.");
+        const repetida = await tx.operacionCobro.findUnique({
+          where: { claveSolicitud: datos.claveOperacion },
+        });
+        if (repetida && repetida.intentoId !== id)
+          fallo("La clave de operación ya se utilizó.");
+        if (intento.operaciones.length) {
+          const operacion = intento.operaciones[0];
+          // Acotar los reenvíos: no asumir que MP conserva la idempotencia para siempre.
+          const dentroDeVentana =
+            operacion.creadoEn.getTime() >
+            Date.now() - MINUTOS_RESERVA * 60_000;
+          const recuperable =
+            dentroDeVentana &&
+            (operacion.estado === "INCIERTA" ||
+              (operacion.estado === "ENVIADA" &&
+                operacion.actualizadoEn.getTime() < Date.now() - 60_000));
+          if (
+            repetida &&
+            recuperable &&
+            !operacion.idOrdenExterna &&
+            pendientes.includes(intento.estado)
+          ) {
+            if (operacion.huellaSolicitud !== huella) {
+              fallo(
+                "La operación incierta requiere la misma clave y los mismos datos de pago. Consulta su resultado.",
+              );
+            }
+            await tx.operacionCobro.update({
+              where: { id: operacion.id },
+              data: { estado: "ENVIADA" },
+            });
+            return { intento, operacion, enviar: true, reenvio: true };
           }
-          await tx.operacionCobro.update({ where: { id: operacion.id }, data: { estado: "ENVIADA" } });
-          return { intento, operacion, enviar: true, reenvio: true };
+          return { intento, operacion, enviar: false, reenvio: false };
         }
-        return { intento, operacion, enviar: false, reenvio: false };
-      }
-      if (!pendientes.includes(intento.estado) || !intento.reservaActiva || intento.expiraEn <= new Date()) {
-        fallo("La reserva terminó. Consulta el intento antes de preparar otra compra.");
-      }
-      const operacionId = randomUUID();
-      const operacion = await tx.operacionCobro.create({ data: {
-        id: operacionId,
-        intentoId: id,
-        claveSolicitud: datos.claveOperacion,
-        claveIdempotencia: operacionId,
-        huellaSolicitud: huella,
-        // Los pagos nuevos no solicitan 3DS desde TecnoLeague. El modo queda
-        // guardado para conservar el mismo payload en reenvíos idempotentes.
-        modoCaptura: "automatic",
-      } });
-      await tx.intentoCompra.update({ where: { id }, data: { estado: "EN_PROCESO" } });
-      return { intento, operacion, enviar: true, reenvio: false };
-    }, { maxWait: 10000, timeout: 15000 });
+        if (
+          !pendientes.includes(intento.estado) ||
+          !intento.reservaActiva ||
+          intento.expiraEn <= new Date()
+        ) {
+          fallo(
+            "La reserva terminó. Consulta el intento antes de preparar otra compra.",
+          );
+        }
+        const operacionId = randomUUID();
+        const operacion = await tx.operacionCobro.create({
+          data: {
+            id: operacionId,
+            intentoId: id,
+            claveSolicitud: datos.claveOperacion,
+            claveIdempotencia: operacionId,
+            huellaSolicitud: huella,
+            // Los pagos nuevos no solicitan 3DS desde TecnoLeague. El modo queda
+            // guardado para conservar el mismo payload en reenvíos idempotentes.
+            modoCaptura: "automatic",
+          },
+        });
+        await tx.intentoCompra.update({
+          where: { id },
+          data: { estado: "EN_PROCESO" },
+        });
+        return { intento, operacion, enviar: true, reenvio: false };
+      },
+      { maxWait: 10000, timeout: 15000 },
+    );
 
     if (preparada.enviar) {
       try {
@@ -485,64 +657,98 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         await this.vincularOrdenApi(preparada.operacion.id, orden);
       } catch (error) {
         if (error instanceof ErrorOrdersMP) {
-          this.logger.error(JSON.stringify({
-            intentoId: id, operacionId: preparada.operacion.id,
-            resultado: "ERROR_CREAR_ORDEN_MP", http: error.httpProveedor,
-            codigo: error.diagnostico.codigo, causas: error.diagnostico.causas,
-            campos: error.diagnostico.campos, formato: error.diagnostico.formato,
-            requestId: error.diagnostico.requestId, reenvio: preparada.reenvio,
-          }));
+          this.logger.error(
+            JSON.stringify({
+              intentoId: id,
+              operacionId: preparada.operacion.id,
+              resultado: "ERROR_CREAR_ORDEN_MP",
+              http: error.httpProveedor,
+              codigo: error.diagnostico.codigo,
+              causas: error.diagnostico.causas,
+              campos: error.diagnostico.campos,
+              formato: error.diagnostico.formato,
+              requestId: error.diagnostico.requestId,
+              reenvio: preparada.reenvio,
+            }),
+          );
         }
         // Un error del REENVÍO no demuestra que la primera llamada no cobró.
-        const rechazado = !preparada.reenvio && error instanceof ErrorOrdersMP && error.rechazadoDefinitivo;
+        const rechazado =
+          !preparada.reenvio &&
+          error instanceof ErrorOrdersMP &&
+          error.rechazadoDefinitivo;
         await this.db.operacionCobro.updateMany({
           where: { id: preparada.operacion.id, estado: "ENVIADA" },
           data: {
             estado: rechazado ? "FINALIZADA" : "INCIERTA",
-            estadoProveedor: rechazado ? `HTTP_${error.httpProveedor}` : undefined,
+            estadoProveedor: rechazado
+              ? `HTTP_${error.httpProveedor}`
+              : undefined,
           },
         });
         if (rechazado) {
           await this.db.intentoCompra.updateMany({
             where: { id, estado: { in: pendientes } },
-            data: { ultimoError: error.httpProveedor === 402 || error.diagnostico.motivoTarjeta
-              ? mensajeRechazoPago([error.diagnostico.motivoTarjeta, ...(error.diagnostico.causas ?? []), error.diagnostico.codigo])
-              : "No pudimos procesar el pago. Inténtalo de nuevo en unos momentos." },
+            data: {
+              ultimoError:
+                error.httpProveedor === 402 || error.diagnostico.motivoTarjeta
+                  ? mensajeRechazoPago([
+                      error.diagnostico.motivoTarjeta,
+                      ...(error.diagnostico.causas ?? []),
+                      error.diagnostico.codigo,
+                    ])
+                  : "No pudimos procesar el pago. Inténtalo de nuevo en unos momentos.",
+            },
           });
           return this.consultarIntento(id, usuarioId);
         }
         await this.registrarFallo(id, error);
         // No guardar el token. El webhook recupera la orden; un reenvío explícito
         // solo acepta la misma clave y el mismo payload con idempotencia MP.
-        throw new ServiceUnavailableException("No se pudo confirmar el cobro. Consulta el mismo intento; no inicies otro pago.");
+        throw new ServiceUnavailableException(
+          "No se pudo confirmar el cobro. Consulta el mismo intento; no inicies otro pago.",
+        );
       }
     }
     return this.consultarIntento(id, usuarioId);
   }
 
   private async vincularOrdenApi(operacionId: string, orden: RecursoMP) {
-    const operacion = await this.db.operacionCobro.findUnique({ where: { id: operacionId } });
-    if (!operacion) throw new ServiceUnavailableException("Operación de cobro no encontrada.");
+    const operacion = await this.db.operacionCobro.findUnique({
+      where: { id: operacionId },
+    });
+    if (!operacion)
+      throw new ServiceUnavailableException(
+        "Operación de cobro no encontrada.",
+      );
     await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM intentos_compra WHERE id = ${operacion.intentoId} FOR UPDATE`;
       const intento = await tx.intentoCompra.findUniqueOrThrow({
-        where: { id: operacion.intentoId }, include: incluirIntento,
+        where: { id: operacion.intentoId },
+        include: incluirIntento,
       });
       this.verificarOrden(orden, intento);
-      if (!intento.pago) throw new ServiceUnavailableException("Intento sin registro de pago.");
+      if (!intento.pago)
+        throw new ServiceUnavailableException("Intento sin registro de pago.");
       await tx.operacionCobro.updateMany({
         where: { id: operacionId, estado: { not: "FINALIZADA" } },
-        data: { idOrdenExterna: String(orden.id), estado: "VINCULADA", estadoProveedor: orden.status },
+        data: {
+          idOrdenExterna: String(orden.id),
+          estado: "VINCULADA",
+          estadoProveedor: orden.status,
+        },
       });
       await tx.pago.update({
-        where: { id: intento.pago.id }, data: { idOrdenExterna: String(orden.id) },
+        where: { id: intento.pago.id },
+        data: { idOrdenExterna: String(orden.id) },
       });
     });
   }
 
   async iniciarPago(datos: PedidoInput, usuarioId: number) {
     this.configuracion();
-    if (!process.env.MP_WEBHOOK_SECRET) fallo("Configura MP_WEBHOOK_SECRET en el backend.");
+    if (!process.env.MP_WEBHOOK_SECRET)
+      fallo("Configura MP_WEBHOOK_SECRET en el backend.");
     const intento = await this.reservarCompra(datos, usuarioId, "REDIRECCION");
     if (!pendientes.includes(intento.estado))
       fallo(
@@ -566,14 +772,24 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
   }
 
   private verificarOrden(orden: RecursoMP, intento: Intento) {
-    const collector = intento.modalidad === "PAYPAL" ? this.paypal.merchantId() : this.configuracion().collector;
+    const collector =
+      intento.modalidad === "PAYPAL"
+        ? this.paypal.merchantId()
+        : this.configuracion().collector;
     if (
       !orden.id ||
       String(orden.user_id) !== collector ||
-      !(orden.currency === intento.moneda ||
-        (intento.modalidad === "ORDERS_API" && !orden.currency && orden.country_code === "MEX" && intento.moneda === "MXN")) ||
-      orden.external_reference !== (intento.modalidad === "ORDERS_API"
-        ? `TL-OP-${intento.operaciones[0]?.id}` : `TL-INTENTO-${intento.id}`) ||
+      !(
+        orden.currency === intento.moneda ||
+        (intento.modalidad === "ORDERS_API" &&
+          !orden.currency &&
+          orden.country_code === "MEX" &&
+          intento.moneda === "MXN")
+      ) ||
+      orden.external_reference !==
+        (intento.modalidad === "ORDERS_API"
+          ? `TL-OP-${intento.operaciones[0]?.id}`
+          : `TL-INTENTO-${intento.id}`) ||
       !this.importeValido(orden.total_amount, intento.total) ||
       (intento.pago?.idOrdenExterna &&
         String(orden.id) !== intento.pago.idOrdenExterna)
@@ -585,7 +801,10 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async prepararOrden(id: string) {
-    const tipo = await this.db.intentoCompra.findUnique({ where: { id }, select: { modalidad: true } });
+    const tipo = await this.db.intentoCompra.findUnique({
+      where: { id },
+      select: { modalidad: true },
+    });
     if (tipo?.modalidad === "PAYPAL") return this.prepararPayPal(id);
     // Guarda exactamente el payload antes de la llamada externa. Un timeout se
     // resuelve reenviándolo con la MISMA clave, nunca creando otro cobro.
@@ -597,7 +816,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
           include: incluirIntento,
         });
         //Las consultas del nuevo flujo nunca crean ni reenvian cobros
-        if(intento.modalidad==="ORDERS_API") return;
+        if (intento.modalidad === "ORDERS_API") return;
         if (
           intento.pago?.idOrdenExterna ||
           !pendientes.includes(intento.estado)
@@ -687,27 +906,58 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
   // comprobado en el log un POST INICIAL con http=402, codigo=failed y reenvio=false.
   // No sirve para timeouts ni para rechazos de reenvíos de cobros inciertos.
   async cerrarRechazoInicial402(id: string, operacionId: string) {
-    const usuarioId = await this.db.$transaction(async tx => {
+    const usuarioId = await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM intentos_compra WHERE id = ${id} FOR UPDATE`;
-      const intento = await tx.intentoCompra.findUnique({ where: { id }, include: incluirIntento });
-      if (!intento || intento.modalidad !== "ORDERS_API") fallo("Intento Orders no encontrado.");
+      const intento = await tx.intentoCompra.findUnique({
+        where: { id },
+        include: incluirIntento,
+      });
+      if (!intento || intento.modalidad !== "ORDERS_API")
+        fallo("Intento Orders no encontrado.");
       const operacion = intento.operaciones[0];
-      if (!operacion || operacion.id !== operacionId || intento.operaciones.length !== 1) {
+      if (
+        !operacion ||
+        operacion.id !== operacionId ||
+        intento.operaciones.length !== 1
+      ) {
         fallo("La operación indicada no coincide con el intento.");
       }
-      if (intento.pago?.idOrdenExterna || operacion.idOrdenExterna || intento.pedidoId) {
-        fallo("La operación ya tiene una orden o pedido. Debe conciliarse con Mercado Pago.");
+      if (
+        intento.pago?.idOrdenExterna ||
+        operacion.idOrdenExterna ||
+        intento.pedidoId
+      ) {
+        fallo(
+          "La operación ya tiene una orden o pedido. Debe conciliarse con Mercado Pago.",
+        );
       }
-      if (operacion.estado === "FINALIZADA" && operacion.estadoProveedor === "HTTP_402") return intento.usuarioId;
-      if (!pendientes.includes(intento.estado) || operacion.estado !== "INCIERTA") {
-        fallo("La operación no es un rechazo histórico incierto; no se modificó.");
+      if (
+        operacion.estado === "FINALIZADA" &&
+        operacion.estadoProveedor === "HTTP_402"
+      )
+        return intento.usuarioId;
+      if (
+        !pendientes.includes(intento.estado) ||
+        operacion.estado !== "INCIERTA"
+      ) {
+        fallo(
+          "La operación no es un rechazo histórico incierto; no se modificó.",
+        );
       }
-      await tx.operacionCobro.update({ where: { id: operacionId }, data: {
-        estado: "FINALIZADA", estadoProveedor: "HTTP_402",
-      } });
-      await tx.intentoCompra.update({ where: { id }, data: {
-        ultimoError: "Mercado Pago rechazó el pago en el primer envío (HTTP 402). Conservamos tu carrito.",
-      } });
+      await tx.operacionCobro.update({
+        where: { id: operacionId },
+        data: {
+          estado: "FINALIZADA",
+          estadoProveedor: "HTTP_402",
+        },
+      });
+      await tx.intentoCompra.update({
+        where: { id },
+        data: {
+          ultimoError:
+            "Mercado Pago rechazó el pago en el primer envío (HTTP 402). Conservamos tu carrito.",
+        },
+      });
       return intento.usuarioId;
     });
     // Reutiliza la conciliación existente: libera stock una sola vez y permite
@@ -735,23 +985,40 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
     }
     const actual = await this.db.intentoCompra.findUniqueOrThrow({
       where: { id },
-      include: { detalles: true, operaciones:true, pago: true },
+      include: { detalles: true, operaciones: true, pago: true },
     });
     const operacion = actual.operaciones[0];
-    const rechazoCobro = actual.estado === "RECHAZADO" && operacion?.estadoProveedor === "HTTP_402";
-    const solicitudRechazada = actual.estado === "RECHAZADO" && !!operacion?.estadoProveedor?.startsWith("HTTP_") && !rechazoCobro;
+    const rechazoCobro =
+      actual.estado === "RECHAZADO" &&
+      operacion?.estadoProveedor === "HTTP_402";
+    const solicitudRechazada =
+      actual.estado === "RECHAZADO" &&
+      !!operacion?.estadoProveedor?.startsWith("HTTP_") &&
+      !rechazoCobro;
     if (!aviso && actual.estado === "RECHAZADO" && !solicitudRechazada) {
-      aviso = mensajeRechazoPago([actual.ultimoError, actual.pago?.estadoProveedor?.split(":")[1]]);
+      aviso = mensajeRechazoPago([
+        actual.ultimoError,
+        actual.pago?.estadoProveedor?.split(":")[1],
+      ]);
     } else if (!aviso && solicitudRechazada) {
-      aviso = mensajeRechazoPago([actual.ultimoError], "No pudimos procesar el pago. Inténtalo de nuevo en unos momentos.");
-    } else if (!aviso && pendientes.includes(actual.estado) && operacion && !actual.pago?.idOrdenExterna) {
-      aviso = operacion.estado === "ENVIADA"
-        ? "Estamos esperando la respuesta de tu pago. Evita volver a pagar mientras lo confirmamos."
-        : "Tu pago aún no está confirmado. Conservamos tu carrito; consulta de nuevo en unos momentos.";
+      aviso = mensajeRechazoPago(
+        [actual.ultimoError],
+        "No pudimos procesar el pago. Inténtalo de nuevo en unos momentos.",
+      );
+    } else if (
+      !aviso &&
+      pendientes.includes(actual.estado) &&
+      operacion &&
+      !actual.pago?.idOrdenExterna
+    ) {
+      aviso =
+        operacion.estado === "ENVIADA"
+          ? "Estamos esperando la respuesta de tu pago. Evita volver a pagar mientras lo confirmamos."
+          : "Tu pago aún no está confirmado. Conservamos tu carrito; consulta de nuevo en unos momentos.";
     }
     return {
       intentoId: id,
-      total:actual.total.toFixed(2),
+      total: actual.total.toFixed(2),
       moneda: actual.moneda,
       modalidad: actual.modalidad,
       autenticacion: pendientes.includes(actual.estado) ? autenticacion : null,
@@ -762,10 +1029,11 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
       expiraEn: actual.expiraEn.toISOString(),
       aviso,
       solicitudRechazada,
-      checkoutUrl: pendientes.includes(actual.estado)
-        && !(actual.modalidad === "PAYPAL" && actual.paypalCapturaIniciadaEn)
-        ? actual.checkoutUrl
-        : null,
+      checkoutUrl:
+        pendientes.includes(actual.estado) &&
+        !(actual.modalidad === "PAYPAL" && actual.paypalCapturaIniciadaEn)
+          ? actual.checkoutUrl
+          : null,
       renglones: actual.detalles.map((d) => ({
         productoId: d.productoId,
         cantidad: d.cantidad,
@@ -811,10 +1079,15 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
       const operacion = await this.db.operacionCobro.findUnique({
         where: { id: referencia.slice("TL-OP-".length) },
       });
-      if (!operacion) throw new ServiceUnavailableException("Operación aún no disponible; reintentar.");
+      if (!operacion)
+        throw new ServiceUnavailableException(
+          "Operación aún no disponible; reintentar.",
+        );
       // Recupera incluso si MP cobró pero se perdió la respuesta del POST.
       await this.vincularOrdenApi(operacion.id, recurso);
-      intento = await this.db.intentoCompra.findUnique({ where: { id: operacion.intentoId } });
+      intento = await this.db.intentoCompra.findUnique({
+        where: { id: operacion.intentoId },
+      });
     }
     if (!intento) {
       // Compatibilidad con órdenes vinculadas a pedidos anteriores a esta migración.
@@ -851,15 +1124,31 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
   private autenticacionOrden(orden: RecursoMP): { url: string } | null {
     for (const pago of orden.transactions?.payments ?? []) {
       const seguridad = pago.payment_method?.transaction_security;
-      const direccion = seguridad?.url ?? (orden.status === "action_required" ? pago.payment_method?.redirect_url : undefined);
-      if (!direccion || (seguridad?.type && seguridad.type !== "challenge") ||
-          (seguridad?.status && !["pending", "waiting_challenge"].includes(seguridad.status))) continue;
+      const direccion =
+        seguridad?.url ??
+        (orden.status === "action_required"
+          ? pago.payment_method?.redirect_url
+          : undefined);
+      if (
+        !direccion ||
+        (seguridad?.type && seguridad.type !== "challenge") ||
+        (seguridad?.status &&
+          !["pending", "waiting_challenge"].includes(seguridad.status))
+      )
+        continue;
       try {
         const url = new URL(direccion);
-        if (url.protocol === "https:" && !url.username && !url.password && url.href.length <= 4096) {
+        if (
+          url.protocol === "https:" &&
+          !url.username &&
+          !url.password &&
+          url.href.length <= 4096
+        ) {
           return { url: url.href };
         }
-      } catch { /* Una URL inválida no se expone al navegador. */ }
+      } catch {
+        /* Una URL inválida no se expone al navegador. */
+      }
     }
     return null;
   }
@@ -877,44 +1166,108 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         const pago = intento.pago;
         if (!pago?.idOrdenExterna) {
           const rechazado = intento.operaciones[0]?.estado === "FINALIZADA";
-          if ((intento.modalidad === "ORDERS_API" || intento.modalidad === "PAYPAL") &&
-              (!intento.operaciones.length || rechazado || (intento.modalidad === "PAYPAL" && !intento.paypalCapturaIniciadaEn && (cancelar || intento.expiraEn <= new Date())))) {
-            if (!rechazado && !cancelar && intento.expiraEn > new Date()) return { resultado: "SIN_COBRO", autenticacion: null };
+          if (
+            (intento.modalidad === "ORDERS_API" ||
+              intento.modalidad === "PAYPAL") &&
+            (!intento.operaciones.length ||
+              rechazado ||
+              (intento.modalidad === "PAYPAL" &&
+                !intento.paypalCapturaIniciadaEn &&
+                (cancelar || intento.expiraEn <= new Date())))
+          ) {
+            if (!rechazado && !cancelar && intento.expiraEn > new Date())
+              return { resultado: "SIN_COBRO", autenticacion: null };
             // No se inició ninguna llamada de cobro. Es seguro liberar la reserva.
             for (const d of intento.detalles) {
               if (!intento.reservaActiva) break;
-              await tx.producto.update({ where: { id: d.productoId }, data: { stock: { increment: d.cantidad } } });
-              await tx.movimientoInventario.create({ data: {
-                productoId: d.productoId, usuarioId: intento.usuarioId,
-                tipo: "LIBERACION", cantidad: d.cantidad, motivo: `Reserva sin cobro ${id}`,
-              } });
-              emitir({ entidad: "INVENTARIO", entidadId: d.productoId, accion: "ACTUALIZADO" });
+              await tx.producto.update({
+                where: { id: d.productoId },
+                data: { stock: { increment: d.cantidad } },
+              });
+              await tx.movimientoInventario.create({
+                data: {
+                  productoId: d.productoId,
+                  usuarioId: intento.usuarioId,
+                  tipo: "LIBERACION",
+                  cantidad: d.cantidad,
+                  motivo: `Reserva sin cobro ${id}`,
+                },
+              });
+              emitir({
+                entidad: "INVENTARIO",
+                entidadId: d.productoId,
+                accion: "ACTUALIZADO",
+              });
             }
-            await tx.intentoCompra.update({ where: { id }, data: {
-              estado: rechazado ? "RECHAZADO" : cancelar ? "CANCELADO" : "EXPIRADO", reservaActiva: false,
-            } });
+            await tx.intentoCompra.update({
+              where: { id },
+              data: {
+                estado: rechazado
+                  ? "RECHAZADO"
+                  : cancelar
+                    ? "CANCELADO"
+                    : "EXPIRADO",
+                reservaActiva: false,
+              },
+            });
             if (pago) {
-              await tx.pago.update({ where: { id: pago.id }, data: { estado: rechazado ? "RECHAZADO" : "CANCELADO" } });
-              emitir({ entidad: "PAGO", entidadId: pago.id, accion: "ACTUALIZADO" });
+              await tx.pago.update({
+                where: { id: pago.id },
+                data: { estado: rechazado ? "RECHAZADO" : "CANCELADO" },
+              });
+              emitir({
+                entidad: "PAGO",
+                entidadId: pago.id,
+                accion: "ACTUALIZADO",
+              });
             }
-            return { resultado: rechazado ? "RECHAZADO" : cancelar ? "CANCELADO" : "EXPIRADO", autenticacion: null };
+            return {
+              resultado: rechazado
+                ? "RECHAZADO"
+                : cancelar
+                  ? "CANCELADO"
+                  : "EXPIRADO",
+              autenticacion: null,
+            };
           }
-          if ((intento.modalidad === "ORDERS_API" || intento.modalidad === "PAYPAL") && !cancelar) {
+          if (
+            (intento.modalidad === "ORDERS_API" ||
+              intento.modalidad === "PAYPAL") &&
+            !cancelar
+          ) {
             // Consultar mientras el POST sigue en curso es esperado. Un timeout
             // conserva su incertidumbre; no crear órdenes ni liberar inventario.
-            await tx.intentoCompra.update({ where: { id }, data: { proximaRevision: new Date(Date.now() + 60_000) } });
+            await tx.intentoCompra.update({
+              where: { id },
+              data: { proximaRevision: new Date(Date.now() + 60_000) },
+            });
             return { resultado: "ESPERANDO_ORDEN", autenticacion: null };
           }
-          throw new ServiceUnavailableException("Orden todavía no vinculada; no iniciar otro cobro.");
+          throw new ServiceUnavailableException(
+            "Orden todavía no vinculada; no iniciar otro cobro.",
+          );
         }
-        let orden: RecursoMP = intento.modalidad === "PAYPAL"
-          ? this.paypal.normalizar(await this.paypal.consultar(pago.idOrdenExterna)) : intento.modalidad === "ORDERS_API"
-          ? await this.orders.consultarOrden(pago.idOrdenExterna)
-          : await this.solicitar(`/v1/orders/${encodeURIComponent(pago.idOrdenExterna)}`);
+        let orden: RecursoMP =
+          intento.modalidad === "PAYPAL"
+            ? this.paypal.normalizar(
+                await this.paypal.consultar(pago.idOrdenExterna),
+              )
+            : intento.modalidad === "ORDERS_API"
+              ? await this.orders.consultarOrden(pago.idOrdenExterna)
+              : await this.solicitar(
+                  `/v1/orders/${encodeURIComponent(pago.idOrdenExterna)}`,
+                );
         this.verificarOrden(orden, intento);
-        if (intento.modalidad === "PAYPAL" && orden.status_detail === "approved" &&
-            intento.operaciones[0]?.estadoProveedor === "PAYPAL_CAPTURE_DECLINED") {
-          orden = { ...orden, status: "failed", status_detail: "rejected_by_bank" };
+        if (
+          intento.modalidad === "PAYPAL" &&
+          orden.status_detail === "approved" &&
+          intento.operaciones[0]?.estadoProveedor === "PAYPAL_CAPTURE_DECLINED"
+        ) {
+          orden = {
+            ...orden,
+            status: "failed",
+            status_detail: "rejected_by_bank",
+          };
         }
         const acreditado = () =>
           orden.status === "processed" && orden.status_detail === "accredited";
@@ -929,10 +1282,18 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
           (cancelar || intento.expiraEn <= new Date())
         ) {
           if (intento.modalidad === "PAYPAL") {
-            if (intento.paypalCapturaIniciadaEn) return { resultado: "PAYPAL_CAPTURA_PENDIENTE", autenticacion: null };
+            if (intento.paypalCapturaIniciadaEn)
+              return {
+                resultado: "PAYPAL_CAPTURA_PENDIENTE",
+                autenticacion: null,
+              };
             // Orders CAPTURE no cobra hasta que nuestro servidor captura. El bloqueo
             // y el estado final impiden iniciar una captura después de cancelar.
-            orden = { ...orden, status: "cancelled", status_detail: "cancelled_in_store" };
+            orden = {
+              ...orden,
+              status: "cancelled",
+              status_detail: "cancelled_in_store",
+            };
           } else {
             // Nunca liberar por el reloj local: primero cancelar en MP y volver a leer.
             await this.solicitar(
@@ -957,20 +1318,38 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
         }
         const estadoProveedor = `${orden.status ?? "unknown"}:${orden.status_detail ?? "unknown"}`;
         if (pago.estadoProveedor !== estadoProveedor) {
-          const codigo = (valor: string | undefined) => valor && /^[A-Za-z0-9_.-]{1,100}$/.test(valor) ? valor : undefined;
-          this.logger.log(JSON.stringify({
-            intentoId: id, ordenId: pago.idOrdenExterna, resultado: intento.modalidad === "PAYPAL" ? "ORDEN_PAYPAL_VERIFICADA" : "ORDEN_MP_VERIFICADA",
-            estado: codigo(orden.status), detalle: codigo(orden.status_detail),
-            transacciones: orden.transactions?.payments?.slice(0, 10).map(transaccion => ({
-              estado: codigo(transaccion.status), detalle: codigo(transaccion.status_detail),
-            })),
-          }));
+          const codigo = (valor: string | undefined) =>
+            valor && /^[A-Za-z0-9_.-]{1,100}$/.test(valor) ? valor : undefined;
+          this.logger.log(
+            JSON.stringify({
+              intentoId: id,
+              ordenId: pago.idOrdenExterna,
+              resultado:
+                intento.modalidad === "PAYPAL"
+                  ? "ORDEN_PAYPAL_VERIFICADA"
+                  : "ORDEN_MP_VERIFICADA",
+              estado: codigo(orden.status),
+              detalle: codigo(orden.status_detail),
+              transacciones: orden.transactions?.payments
+                ?.slice(0, 10)
+                .map((transaccion) => ({
+                  estado: codigo(transaccion.status),
+                  detalle: codigo(transaccion.status_detail),
+                })),
+            }),
+          );
         }
-        if (intento.modalidad === "ORDERS_API" || intento.modalidad === "PAYPAL") {
-          await tx.operacionCobro.updateMany({ where: { intentoId: id }, data: {
-            estado: acreditado() || terminal() ? "FINALIZADA" : "VINCULADA",
-            estadoProveedor,
-          } });
+        if (
+          intento.modalidad === "ORDERS_API" ||
+          intento.modalidad === "PAYPAL"
+        ) {
+          await tx.operacionCobro.updateMany({
+            where: { intentoId: id },
+            data: {
+              estado: acreditado() || terminal() ? "FINALIZADA" : "VINCULADA",
+              estadoProveedor,
+            },
+          });
         }
         const claveEvento = createHash("sha256")
           .update(
@@ -1041,7 +1420,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
               huellaSolicitud: intento.huellaSolicitud,
               total: intento.total,
               status: "PAGADO",
-              metodoPago: intento.modalidad === "PAYPAL" ? "PAYPAL" : "MERCADO_PAGO",
+              metodoPago:
+                intento.modalidad === "PAYPAL" ? "PAYPAL" : "MERCADO_PAGO",
               detalles: {
                 create: intento.detalles.map((d) => ({
                   productoId: d.productoId,
@@ -1059,7 +1439,9 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
               estado: "APROBADO",
               estadoProveedor,
               aprobadoEn: new Date(),
-              ...(intento.modalidad === "PAYPAL" ? { idPagoExterno: orden.capture_id } : {}),
+              ...(intento.modalidad === "PAYPAL"
+                ? { idPagoExterno: orden.capture_id }
+                : {}),
             },
           });
           await tx.intentoCompra.update({
@@ -1087,7 +1469,10 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
               pedidoId: pedido.id,
               actorId: intento.usuarioId,
               hacia: "PAGADO",
-              motivo: intento.modalidad === "PAYPAL" ? "Pago capturado y verificado con PayPal" : "Pago acreditado verificado con Mercado Pago",
+              motivo:
+                intento.modalidad === "PAYPAL"
+                  ? "Pago capturado y verificado con PayPal"
+                  : "Pago acreditado verificado con Mercado Pago",
             },
           });
           emitir({ entidad: "PEDIDO", entidadId: pedido.id, accion: "CREADO" });
@@ -1135,11 +1520,19 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
                 : "CANCELADO";
           await tx.intentoCompra.update({
             where: { id },
-            data: { estado, reservaActiva: false, ultimoError: estado === "RECHAZADO"
-              ? mensajeRechazoPago([
-                ...(orden.transactions?.payments ?? []).filter(p => p.status === "failed").map(p => p.status_detail),
-                orden.status_detail,
-              ]) : null },
+            data: {
+              estado,
+              reservaActiva: false,
+              ultimoError:
+                estado === "RECHAZADO"
+                  ? mensajeRechazoPago([
+                      ...(orden.transactions?.payments ?? [])
+                        .filter((p) => p.status === "failed")
+                        .map((p) => p.status_detail),
+                      orden.status_detail,
+                    ])
+                  : null,
+            },
           });
           await tx.pago.update({
             where: { id: pago.id },
@@ -1196,7 +1589,10 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
             entidadId: pago.id,
             accion: "ACTUALIZADO",
           });
-        return { resultado: "EN_PROCESO", autenticacion: this.autenticacionOrden(orden) };
+        return {
+          resultado: "EN_PROCESO",
+          autenticacion: this.autenticacionOrden(orden),
+        };
       },
       { maxWait: 10000, timeout: 45000 },
     );
@@ -1301,7 +1697,8 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
   async revisarPendientes() {
     if (
       this.revisando ||
-      ((!process.env.MP_ACCESS_TOKEN || !process.env.MP_COLLECTOR_ID) && !process.env.PAYPAL_CLIENT_ID)
+      ((!process.env.MP_ACCESS_TOKEN || !process.env.MP_COLLECTOR_ID) &&
+        !process.env.PAYPAL_CLIENT_ID)
     )
       return;
     this.revisando = true;

@@ -9,9 +9,11 @@ export class PagosResolver {
     private readonly pagos: PagosService,
     private readonly auth: AuthService,
   ) {}
+
   //mutatios preparar compra y procesar compra
   @Mutation("iniciarPagoPayPal")
   async iniciarPagoPayPal(@Args("datos") datos: PedidoInput, @Context() ctx: RequestContext) {
+    //entrega datos a pagos Service
     return this.pagos.iniciarPagoPayPal(datos, (await this.auth.usuarioActual(ctx)).id);
   }
 
