@@ -25,7 +25,7 @@ Astro escucha en todas las interfaces. Las consultas, las imágenes y las actual
 
 `BACKEND_GRAPHQL_URL` sigue apuntando a NestJS desde la laptop, normalmente `http://127.0.0.1:4000/graphql`. Reinicia `npm run dev` tras cambiar los archivos `.env`. Cada dirección tiene sus propias cookies: inicia sesión en la dirección que estés utilizando.
 
-En producción, configura `PUBLIC_BACKOFFICE_WS_URL=wss://TU_BACKEND/graphql`. El backend debe admitir conexiones persistentes y el proxy de despliegue debe permitir WebSocket. El proxy de desarrollo de Astro no se publica como proxy WebSocket en Netlify.
+En Netlify, configura `BACKEND_GRAPHQL_URL=https://TU_BACKEND.onrender.com/graphql` para el build y las Functions y vuelve a desplegar. Las actualizaciones en vivo usan automáticamente `wss://TU_BACKEND.onrender.com/graphql`: no necesitas `PUBLIC_BACKOFFICE_WS_URL`. Esa variable es opcional si tu WebSocket usa otra dirección pública. El navegador conecta directamente a NestJS con un ticket temporal; Netlify no hospeda ni reenvía el WebSocket. Render debe admitir conexiones persistentes. Los valores `localhost` de los ejemplos y del proxy son para desarrollo; en producción ya no se usa una dirección local implícita si falta `BACKEND_GRAPHQL_URL`.
 
 ## Añadir imágenes
 

@@ -57,7 +57,7 @@ describe("destino WebSocket", () => {
   });
   it("requiere un destino público seguro en producción", () => {
     expect(() => backOfficeUrl("", false, "https://tienda.test")).toThrow(
-      "PUBLIC_BACKOFFICE_WS_URL",
+      "BACKEND_GRAPHQL_URL",
     );
     expect(() =>
       backOfficeUrl("ws://backend.test/graphql", false, "https://tienda.test"),
@@ -72,6 +72,14 @@ describe("destino WebSocket", () => {
     expect(
       backOfficeUrl("wss://backend.test/graphql", false, "https://tienda.test"),
     ).toBe("wss://backend.test/graphql");
+  });
+  it("deduce el destino de producción del ticket y respeta la URL alternativa", () => {
+    expect(backOfficeUrl("", false, "https://tienda.netlify.app", "wss://backend.onrender.com/graphql"))
+      .toBe("wss://backend.onrender.com/graphql");
+    expect(backOfficeUrl("wss://otro.test/graphql", false, "https://tienda.netlify.app", "wss://backend.onrender.com/graphql"))
+      .toBe("wss://otro.test/graphql");
+    expect(() => backOfficeUrl("", false, "https://tienda.netlify.app", "ws://localhost:4000/graphql"))
+      .toThrow("wss://");
   });
 });
 
@@ -197,6 +205,36 @@ describe("conexión administrativa", () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     ws.options = null;
     ws.sink = null;
+  });
+  it("conecta desde producción sin PUBLIC_BACKOFFICE_WS_URL con el destino del ticket", async () => {
+    vi.stubEnv("DEV", false);
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => Response.json({
+      ticket: "ticket-privado",
+      expiraEn: new Date(Date.now() + 60000).toISOString(),
+      wsUrl: "wss://backend.onrender.com/graphql",
+    })));
+    renderHook(() => useBackOfficeEvents(vi.fn()));
+    await waitFor(() => expect(ws.create).toHaveBeenCalledOnce());
+    expect(ws.options.url).toBe("wss://backend.onrender.com/graphql");
+    expect(ws.options.connectionParams.ticket).toBe("ticket-privado");
+  });
+  it("usa el proxy de desarrollo aunque el ticket contenga una dirección local", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => Response.json({
+      ticket: "ticket-privado",
+      expiraEn: new Date(Date.now() + 60000).toISOString(),
+      wsUrl: "ws://127.0.0.1:4000/graphql",
+    })));
+    renderHook(() => useBackOfficeEvents(vi.fn()));
+    await waitFor(() => expect(ws.create).toHaveBeenCalledOnce());
+    expect(ws.options.url).toBe(backOfficeUrl("", true, window.location.href));
+  });
+  it("no abre un socket ni reintenta sin límite si producción carece de destino", async () => {
+    vi.stubEnv("DEV", false);
+    const { result } = renderHook(() => useBackOfficeEvents(vi.fn()));
+    await waitFor(() => expect(result.current.estado).toBe("disconnected"));
+    expect(result.current.detalle).toContain("BACKEND_GRAPHQL_URL");
+    expect(ws.create).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledOnce();
   });
   it("agrupa y deduplica eventos; al reconectar recupera datos y al salir libera la conexión", async () => {
     const refresh = vi.fn(),

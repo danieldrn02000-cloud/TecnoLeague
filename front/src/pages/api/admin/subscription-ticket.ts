@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { randomUUID } from "node:crypto";
+import { backendWebSocketUrl } from "../../../lib/server/backend-url";
 import {
   errorStatus,
   mismoOrigen,
@@ -80,7 +81,16 @@ export async function emitirTicketBackOffice(
       Number.isFinite(Date.parse(ticket.expiraEn)) &&
       Date.parse(ticket.expiraEn) > Date.now()
     ) {
-      return responder(ticket, 200, "TICKET_READY");
+      return responder(
+        {
+          ...ticket,
+          // Netlify no tiene el proxy WebSocket de Vite. El navegador conecta
+          // directamente a NestJS, autenticándose con el ticket de corta duración.
+          ...(!import.meta.env.DEV ? { wsUrl: backendWebSocketUrl() } : {}),
+        },
+        200,
+        "TICKET_READY",
+      );
     }
     const fallo = body.errors?.[0];
     const backendCode = fallo?.extensions?.code;

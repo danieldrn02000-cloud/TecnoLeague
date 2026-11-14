@@ -1,5 +1,6 @@
 import type { APIContext } from "astro";
 import type { AuthUser } from "../../types";
+import { backendGraphqlUrl } from "./backend-url";
 
 export type BackendError = {
   message: string;
@@ -28,7 +29,7 @@ export async function requestBackend<T>(
     headers.set("x-auth-bridge-secret", import.meta.env.AUTH_BRIDGE_SECRET);
   }
   const response = await fetch(
-    import.meta.env.BACKEND_GRAPHQL_URL || "http://127.0.0.1:4000/graphql",
+    backendGraphqlUrl(),
     {
       method: "POST",
       headers,

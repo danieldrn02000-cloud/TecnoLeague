@@ -153,24 +153,6 @@ export function useBackOfficeEvents(avisar: (mensaje: string) => void) {
       }, espera);
     };
 
-    let destino: string;
-    try {
-      destino = backOfficeUrl(
-        import.meta.env.PUBLIC_BACKOFFICE_WS_URL,
-        import.meta.env.DEV,
-        window.location.href,
-      );
-    } catch (error) {
-      setEstado("disconnected");
-      setDetalle(
-        error instanceof Error ? error.message : "Destino WebSocket inválido.",
-      );
-      return () => {
-        activo = false;
-        abort.abort();
-      };
-    }
-
     async function conectar() {
       const actual = ++generacion;
       const vigente = () => activo && actual === generacion;
@@ -185,11 +167,27 @@ export function useBackOfficeEvents(avisar: (mensaje: string) => void) {
         // Obtener el ticket ANTES de construir el socket en cada intento.
         // Gestionar aquí los fallos evita rechazos sin manejar en la URL async
         // de graphql-ws y permite reintentar aunque el ticket HTTP falle.
-        const ticket = await solicitarTicket(
+        const { ticket, wsUrl } = await solicitarTicket(
           AbortSignal.any([abort.signal, AbortSignal.timeout(15000)]),
           requestId,
         );
         if (!vigente()) return;
+        let destino: string;
+        try {
+          destino = backOfficeUrl(
+            import.meta.env.PUBLIC_BACKOFFICE_WS_URL,
+            import.meta.env.DEV,
+            window.location.href,
+            wsUrl,
+          );
+        } catch (error) {
+          throw new FalloTicket(
+            error instanceof Error ? error.message : "Destino WebSocket inválido.",
+            422,
+            "WS_URL_INVALID",
+            requestId,
+          );
+        }
         diagnosticoBackOffice("ticket_obtenido", {
           requestId,
           intento: numeroIntento,

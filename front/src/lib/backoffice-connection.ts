@@ -67,6 +67,7 @@ export async function solicitarTicket(signal: AbortSignal, requestId: string) {
     error?: string;
     code?: string;
     requestId?: string;
+    wsUrl?: string;
   } | null;
   if (
     !response.ok ||
@@ -83,7 +84,7 @@ export async function solicitarTicket(signal: AbortSignal, requestId: string) {
       payload?.requestId ?? requestId,
     );
   }
-  return payload.ticket;
+  return { ticket: payload.ticket, wsUrl: payload.wsUrl };
 }
 
 export function codigoCierre(error: unknown): number | undefined {
@@ -109,7 +110,7 @@ export function mensajeCierre(codigo: number | undefined) {
     case 1006:
       return "La conexión WebSocket se interrumpió sin respuesta (1006). Comprueba que NestJS y el proxy de Astro estén activos.";
     default:
-      return `No se pudo mantener la conexión WebSocket${codigo ? ` (código ${codigo})` : ""}. Comprueba el backend y PUBLIC_BACKOFFICE_WS_URL.`;
+      return `No se pudo mantener la conexión WebSocket${codigo ? ` (código ${codigo})` : ""}. Comprueba la disponibilidad y la dirección pública de NestJS.`;
   }
 }
 
