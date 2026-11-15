@@ -131,6 +131,26 @@ export class AdminResolver {
     return this.admin.actualizarEstadoPedido(id, estado, actorId(ctx), motivo);
   }
 
+  @Mutation("registrarRastreoPedido")
+  registrarRastreoPedido(
+    @Args("id") id: number,
+    @Args("numeroGuia") numeroGuia: string,
+    @Args("transportista") transportista: string,
+    @Args("codigoTransportista") codigoTransportista: number | undefined,
+  ) {
+    return this.admin.registrarRastreoPedido(
+      id,
+      numeroGuia,
+      transportista,
+      codigoTransportista,
+    );
+  }
+
+  @Mutation("consultarRastreoPedido")
+  consultarRastreoPedido(@Args("id") id: number) {
+    return this.admin.consultarRastreoPedido(id);
+  }
+
   @Mutation("ajustarInventario")
   ajustarInventario(
     @Args("productoId") productoId: number,
@@ -214,3 +234,4 @@ export class PagoPedidoResolver {
     return pedido.fecha.toISOString();
   }
 }
+

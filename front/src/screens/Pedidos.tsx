@@ -3,6 +3,22 @@ import { ArrowRight, Check, ChevronDown, Package } from "lucide-react";
 import { dinero, PEDIDO, useQuery } from "../api";
 import { Cargando, ErrorCarga, Imagen, Vacio } from "../components/ui";
 import type { Navegar, Pedido } from "../types";
+
+function estadoSeguimiento(estado: string) {
+  const etiquetas: Record<string, string> = {
+    NotFound: "Sin información",
+    InfoReceived: "Información recibida",
+    InTransit: "En tránsito",
+    Expired: "Sin actualizaciones recientes",
+    AvailableForPickup: "Disponible para recoger",
+    OutForDelivery: "En reparto",
+    DeliveryFailure: "Intento de entrega fallido",
+    Delivered: "Entregado",
+    Exception: "Incidencia",
+  };
+  return etiquetas[estado] ?? estado;
+}
+
 export function Pedidos({ navegar }: { navegar: Navegar }) {
   const { data, loading, error, retry } = useQuery<{ pedidos: Pedido[] }>(
     `query Historial{pedidos{${PEDIDO}}}`,
@@ -108,6 +124,37 @@ export function Pedidos({ navegar }: { navegar: Navegar }) {
                   <p>
                     Entrega para <strong>{p.nombre}</strong> · {p.direccion}
                   </p>
+                  {p.trackingNumber && (
+                    <section className="pedido-rastreo">
+                      <strong>Seguimiento del envío</strong>
+                      <p>
+                        {p.trackingCarrierName} · Guía {p.trackingNumber}
+                      </p>
+                      {p.trackingStatus && (
+                        <p>
+                          Estado:{" "}
+                          <strong>{estadoSeguimiento(p.trackingStatus)}</strong>
+                        </p>
+                      )}
+                      {p.trackingDescription && (
+                        <p>{p.trackingDescription}</p>
+                      )}
+                      {p.trackingUpdatedAt && (
+                        <small>
+                          Última actualización:{" "}
+                          {new Date(p.trackingUpdatedAt).toLocaleString("es-MX")}
+                        </small>
+                      )}
+                      <a
+                        className="text-btn"
+                        href={`https://t.17track.net/en#nums=${encodeURIComponent(p.trackingNumber)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Rastrear en 17TRACK
+                      </a>
+                    </section>
+                  )}
                 </div>
               )}
             </article>

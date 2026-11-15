@@ -667,7 +667,11 @@ function PedidosAdmin({ avisar }: { avisar: (s: string) => void }) {
         </>
       )}
       {detalle !== null && (
-        <DetallePedidoAdmin id={detalle} cerrar={() => setDetalle(null)} />
+        <DetallePedidoAdmin
+          id={detalle}
+          cerrar={() => setDetalle(null)}
+          avisar={avisar}
+        />
       )}
     </>
   );
@@ -709,11 +713,18 @@ function Paginacion({
 function DetallePedidoAdmin({
   id,
   cerrar,
+  avisar,
 }: {
   id: number;
   cerrar: () => void;
+  avisar: (s: string) => void;
 }) {
-  const consulta = `query($id:Int!){adminPedido(id:$id){folio fecha status nombre email direccion metodoPago total detalles{id cantidad nombreProducto precioUnitario subtotal}}}`;
+  const consulta = `query($id:Int!){adminPedido(id:$id){folio fecha status nombre email direccion metodoPago total trackingNumber trackingCarrierName trackingCarrierId trackingStatus trackingDescription trackingUpdatedAt detalles{id cantidad nombreProducto precioUnitario subtotal}}}`;
+  const [numeroGuia, setNumeroGuia] = useState("");
+  const [transportista, setTransportista] = useState("");
+  const [codigoTransportista, setCodigoTransportista] = useState("");
+  const [errorRastreo, setErrorRastreo] = useState("");
+  const [guardandoRastreo, setGuardandoRastreo] = useState(false);
   const { data, loading, error, retry } = useQuery<{
     adminPedido: {
       folio: string;
@@ -724,6 +735,12 @@ function DetallePedidoAdmin({
       direccion: string;
       metodoPago: string;
       total: number;
+      trackingNumber: string | null;
+      trackingCarrierName: string | null;
+      trackingCarrierId: number | null;
+      trackingStatus: string | null;
+      trackingDescription: string | null;
+      trackingUpdatedAt: string | null;
       detalles: {
         id: number;
         cantidad: number;
@@ -733,6 +750,59 @@ function DetallePedidoAdmin({
       }[];
     };
   }>(consulta, { id });
+  useEffect(() => {
+    const pedido = data?.adminPedido;
+    if (!pedido) return;
+    setNumeroGuia(pedido.trackingNumber ?? "");
+    setTransportista(pedido.trackingCarrierName ?? "");
+    setCodigoTransportista(
+      pedido.trackingCarrierId == null ? "" : String(pedido.trackingCarrierId),
+    );
+  }, [
+    data?.adminPedido.trackingNumber,
+    data?.adminPedido.trackingCarrierName,
+    data?.adminPedido.trackingCarrierId,
+  ]);
+  async function registrarRastreo(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setErrorRastreo("");
+    setGuardandoRastreo(true);
+    try {
+      await graphql(
+        "mutation($id:Int!,$numeroGuia:String!,$transportista:String!,$codigoTransportista:Int){registrarRastreoPedido(id:$id,numeroGuia:$numeroGuia,transportista:$transportista,codigoTransportista:$codigoTransportista){id}}",
+        {
+          id,
+          numeroGuia,
+          transportista,
+          codigoTransportista: codigoTransportista
+            ? Number(codigoTransportista)
+            : null,
+        },
+      );
+      avisar("Guía registrada en 17TRACK");
+      retry();
+    } catch (e) {
+      setErrorRastreo((e as Error).message);
+    } finally {
+      setGuardandoRastreo(false);
+    }
+  }
+  async function consultarRastreo() {
+    setErrorRastreo("");
+    setGuardandoRastreo(true);
+    try {
+      await graphql(
+        "mutation($id:Int!){consultarRastreoPedido(id:$id){id}}",
+        { id },
+      );
+      avisar("Seguimiento actualizado desde 17TRACK");
+      retry();
+    } catch (e) {
+      setErrorRastreo((e as Error).message);
+    } finally {
+      setGuardandoRastreo(false);
+    }
+  }
   useBackOfficeRefresh(retry, ["PEDIDO", "PAGO"]);
   const historial = useQuery<{
     historialPedido: {
@@ -779,6 +849,78 @@ function DetallePedidoAdmin({
               {pedido.metodoPago.replaceAll("_", " ")} · {pedido.status}
             </span>
           </div>
+          <form className="admin-tracking-form" onSubmit={registrarRastreo}>
+            <h3>Seguimiento con 17TRACK</h3>
+            <label>
+              Paquetería
+              <input
+                value={transportista}
+                onChange={(event) => setTransportista(event.target.value)}
+                maxLength={80}
+                required
+              />
+            </label>
+            <label>
+              Número de guía
+              <input
+                value={numeroGuia}
+                onChange={(event) => setNumeroGuia(event.target.value)}
+                minLength={5}
+                maxLength={50}
+                pattern="[A-Za-z0-9-]{5,50}"
+                required
+              />
+            </label>
+            <label>
+              Código de paquetería en 17TRACK (opcional)
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={codigoTransportista}
+                onChange={(event) =>
+                  setCodigoTransportista(event.target.value)
+                }
+              />
+            </label>
+            {errorRastreo && (
+              <p className="form-error" role="alert">
+                {errorRastreo}
+              </p>
+            )}
+            <div className="admin-tracking-actions">
+              <button className="btn" disabled={guardandoRastreo}>
+                {guardandoRastreo ? "Registrando…" : "Registrar guía"}
+              </button>
+              {pedido.trackingNumber && (
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  disabled={guardandoRastreo}
+                  onClick={() => void consultarRastreo()}
+                >
+                  Consultar 17TRACK
+                </button>
+              )}
+            </div>
+            {pedido.trackingNumber && (
+              <p className="muted">
+                {pedido.trackingCarrierName} · {pedido.trackingNumber}
+                {pedido.trackingCarrierId
+                  ? ` · Código 17TRACK ${pedido.trackingCarrierId}`
+                  : ""}
+                {pedido.trackingStatus
+                  ? ` · ${pedido.trackingStatus}`
+                  : ""}
+                {pedido.trackingDescription
+                  ? ` · ${pedido.trackingDescription}`
+                  : ""}
+                {pedido.trackingUpdatedAt
+                  ? ` · Consultado ${new Date(pedido.trackingUpdatedAt).toLocaleString("es-MX")}`
+                  : ""}
+              </p>
+            )}
+          </form>
           <div className="table-wrap">
             <table>
               <thead>

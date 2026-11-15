@@ -1,9 +1,16 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
-  obtenerMercadoPago, type CampoSeguro, type InstanciaMercadoPago,
-  type MetodoTarjeta, type PlanCuotas, type TarjetaTokenizada,
+  obtenerMercadoPago,
+  type CampoSeguro,
+  type InstanciaMercadoPago,
+  type MetodoTarjeta,
+  type PlanCuotas,
+  type TarjetaTokenizada,
 } from "../lib/mercadoPago";
-import { mensajeCampoTarjeta, mensajeErrorTarjeta } from "../lib/mensajes-tarjeta";
+import {
+  mensajeCampoTarjeta,
+  mensajeErrorTarjeta,
+} from "../lib/mensajes-tarjeta";
 
 type Props = {
   importe: string;
@@ -16,14 +23,23 @@ type Metadatos = {
   planes: PlanCuotas[];
 };
 function costosDisponibles(datos: Metadatos, emisor: string) {
-  if (datos.metodo.payment_type_id === "debit_card") return [{ installments: 1, recommended_message: "Un solo pago" }];
-  return datos.planes.filter(p =>
-    (!p.payment_method_id || p.payment_method_id === datos.metodo.id) &&
-    (!p.issuer?.id || String(p.issuer.id) === emisor),
-  ).flatMap(p => p.payer_costs).filter(p => p.installments >= 1 && p.installments <= 36);
+  if (datos.metodo.payment_type_id === "debit_card")
+    return [{ installments: 1, recommended_message: "Un solo pago" }];
+  return datos.planes
+    .filter(
+      (p) =>
+        (!p.payment_method_id || p.payment_method_id === datos.metodo.id) &&
+        (!p.issuer?.id || String(p.issuer.id) === emisor),
+    )
+    .flatMap((p) => p.payer_costs)
+    .filter((p) => p.installments >= 1 && p.installments <= 36);
 }
 
-export function FormularioTarjeta({ importe, procesando = false, onToken }: Props) {
+export function FormularioTarjeta({
+  importe,
+  procesando = false,
+  onToken,
+}: Props) {
   const reactId = useId();
   const prefijo = `mp-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const id = (campo: string) => `${prefijo}-${campo}`;
@@ -31,7 +47,9 @@ export function FormularioTarjeta({ importe, procesando = false, onToken }: Prop
   const [cargando, setCargando] = useState(false);
   const [enviandoToken, setEnviandoToken] = useState(false);
   const [error, setError] = useState("");
-  const [erroresCampos, setErroresCampos] = useState<Record<string, string>>({});
+  const [erroresCampos, setErroresCampos] = useState<Record<string, string>>(
+    {},
+  );
   const [revision, setRevision] = useState(0);
   const [metadatos, setMetadatos] = useState<Metadatos | null>(null);
   const [emisor, setEmisor] = useState("");
@@ -54,7 +72,8 @@ export function FormularioTarjeta({ importe, procesando = false, onToken }: Prop
     setErroresCampos({});
     async function montar() {
       try {
-        if (!/^\d+\.\d{2}$/.test(importe) || Number(importe) <= 0) throw new Error("El importe debe ser mayor que cero.");
+        if (!/^\d+\.\d{2}$/.test(importe) || Number(importe) <= 0)
+          throw new Error("El importe debe ser mayor que cero.");
         const mp = await obtenerMercadoPago();
         if (!activo) return;
         sdk.current = mp;
@@ -65,13 +84,23 @@ export function FormularioTarjeta({ importe, procesando = false, onToken }: Prop
         for (const [indice, tipo] of tipos.entries()) {
           const campo = mp.fields.create(tipo, { placeholder: textos[indice] });
           campos.push(campo);
-          campo.on("ready", () => { if (activo && ++preparados === 3) setListo(true); });
-          campo.on("error", () => { if (activo) setError("No se pudo cargar un campo de tarjeta. Recarga el formulario."); });
-          campo.on("validityChange", evento => {
+          campo.on("ready", () => {
+            if (activo && ++preparados === 3) setListo(true);
+          });
+          campo.on("error", () => {
+            if (activo)
+              setError(
+                "No se pudo cargar un campo de tarjeta. Recarga el formulario.",
+              );
+          });
+          campo.on("validityChange", (evento) => {
             if (!activo || !Array.isArray(evento.errorMessages)) return;
-            setErroresCampos(previos => {
+            setErroresCampos((previos) => {
               const nuevos = { ...previos };
-              if (evento.errorMessages!.length) nuevos[tipo] = mensajeCampoTarjeta(tipo) ?? "Revisa este dato de tu tarjeta.";
+              if (evento.errorMessages!.length)
+                nuevos[tipo] =
+                  mensajeCampoTarjeta(tipo) ??
+                  "Revisa este dato de tu tarjeta.";
               else delete nuevos[tipo];
               return nuevos;
             });
@@ -89,32 +118,55 @@ export function FormularioTarjeta({ importe, procesando = false, onToken }: Prop
           try {
             const respuesta = await mp.getPaymentMethods({ bin });
             if (!activo || version !== versionBin.current) return;
-            const metodo = respuesta.results.find(m => ["credit_card", "debit_card"].includes(m.payment_type_id));
-            if (!metodo) throw new Error("Esta tarjeta no tiene un método de pago compatible.");
+            const metodo = respuesta.results.find((m) =>
+              ["credit_card", "debit_card"].includes(m.payment_type_id),
+            );
+            if (!metodo)
+              throw new Error(
+                "Esta tarjeta no tiene un método de pago compatible.",
+              );
             const ajustes = metodo.settings?.[0];
-            if (ajustes?.card_number) campos[0].update({ settings: ajustes.card_number });
-            if (ajustes?.security_code) campos[2].update({ settings: ajustes.security_code });
+            if (ajustes?.card_number)
+              campos[0].update({ settings: ajustes.card_number });
+            if (ajustes?.security_code)
+              campos[2].update({ settings: ajustes.security_code });
             const [emisores, planes] = await Promise.all([
               mp.getIssuers({ paymentMethodId: metodo.id, bin }),
-              metodo.payment_type_id === "debit_card" ? Promise.resolve([]) : mp.getInstallments({ amount: importe, bin }),
+              metodo.payment_type_id === "debit_card"
+                ? Promise.resolve([])
+                : mp.getInstallments({ amount: importe, bin }),
             ]);
             if (!activo || version !== versionBin.current) return;
             const datos = { metodo, emisores, planes };
             const banco = String(emisores[0]?.id ?? "");
             const opciones = costosDisponibles(datos, banco);
-            if (!opciones.length) throw new Error("No hay opciones de pago disponibles para esta tarjeta.");
+            if (!opciones.length)
+              throw new Error(
+                "No hay opciones de pago disponibles para esta tarjeta.",
+              );
             setMetadatos(datos);
             setEmisor(banco);
-            setCuotas(String(opciones.find(p => p.installments === 1)?.installments ?? opciones[0].installments));
+            setCuotas(
+              String(
+                opciones.find((p) => p.installments === 1)?.installments ??
+                  opciones[0].installments,
+              ),
+            );
           } catch {
-            if (activo && version === versionBin.current) setError("No pudimos consultar el banco y las opciones de pago. Revisa la tarjeta o recarga el formulario.");
+            if (activo && version === versionBin.current)
+              setError(
+                "No pudimos consultar el banco y las opciones de pago. Revisa la tarjeta o recarga el formulario.",
+              );
           } finally {
             if (activo && version === versionBin.current) setCargando(false);
           }
         });
         campos.forEach((campo, i) => campo.mount(`${prefijo}-${nombres[i]}`));
       } catch {
-        if (activo) setError("No pudimos cargar el formulario de pago. Inténtalo de nuevo en unos momentos.");
+        if (activo)
+          setError(
+            "No pudimos cargar el formulario de pago. Inténtalo de nuevo en unos momentos.",
+          );
       }
     }
     void montar();
@@ -123,28 +175,57 @@ export function FormularioTarjeta({ importe, procesando = false, onToken }: Prop
       montado.current = false;
       ++versionBin.current;
       sdk.current = null;
-      campos.forEach(campo => campo.unmount());
+      campos.forEach((campo) => campo.unmount());
     };
   }, [importe, prefijo, revision]);
 
   async function enviar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (enviando.current || procesando || !listo || cargando || !metadatos || !sdk.current || Object.keys(erroresCampos).length) return;
+    if (
+      enviando.current ||
+      procesando ||
+      !listo ||
+      cargando ||
+      !metadatos ||
+      !sdk.current ||
+      Object.keys(erroresCampos).length
+    )
+      return;
     const tipo = metadatos.metodo.payment_type_id;
     if (tipo !== "credit_card" && tipo !== "debit_card") return;
-    if (!costosDisponibles(metadatos, emisor).some(p => String(p.installments) === cuotas)) return;
-    const titular = String(new FormData(event.currentTarget).get("titular") ?? "").trim();
-    if (!titular) { setError("Escribe el nombre del titular."); return; }
+    if (
+      !costosDisponibles(metadatos, emisor).some(
+        (p) => String(p.installments) === cuotas,
+      )
+    )
+      return;
+    const titular = String(
+      new FormData(event.currentTarget).get("titular") ?? "",
+    ).trim();
+    if (!titular) {
+      setError("Escribe el nombre del titular.");
+      return;
+    }
     const version = versionBin.current;
     enviando.current = true;
     setEnviandoToken(true);
     setError("");
     try {
-      const token = await sdk.current.fields.createCardToken({ cardholderName: titular });
+      const token = await sdk.current.fields.createCardToken({
+        cardholderName: titular,
+      });
       if (!montado.current) return;
-      if (version !== versionBin.current) throw new Error("La tarjeta cambió. Revisa los datos antes de continuar.");
+      if (version !== versionBin.current)
+        throw new Error(
+          "La tarjeta cambió. Revisa los datos antes de continuar.",
+        );
       if (!token?.id) throw new Error("No se pudo validar la tarjeta.");
-      await onToken({ token: token.id, paymentMethodId: metadatos.metodo.id, paymentTypeId: tipo, installments: cuotas });
+      await onToken({
+        token: token.id,
+        paymentMethodId: metadatos.metodo.id,
+        paymentTypeId: tipo,
+        installments: cuotas,
+      });
     } catch (error) {
       if (montado.current) setError(mensajeErrorTarjeta(error));
     } finally {
@@ -160,34 +241,106 @@ export function FormularioTarjeta({ importe, procesando = false, onToken }: Prop
       <p>Total a pagar: ${importe} MXN</p>
       <form className="tarjeta-form" onSubmit={enviar}>
         <fieldset disabled={procesando || enviandoToken}>
-          <div><label htmlFor={id("titular")}>Titular</label><input id={id("titular")} name="titular" required autoComplete="cc-name" maxLength={120} /></div>
-          <div><span>Número de tarjeta</span><div id={id("numero")} className="mp-campo-seguro" /></div>
-          {erroresCampos.cardNumber && <p role="alert">{erroresCampos.cardNumber}</p>}
-          <div className="tarjeta-fila">
-            <div><span>Vencimiento</span><div id={id("vencimiento")} className="mp-campo-seguro" /></div>
-            <div><span>Código de seguridad</span><div id={id("cvv")} className="mp-campo-seguro" /></div>
+          <div>
+            <label htmlFor={id("titular")}>Titular</label>
+            <input
+              id={id("titular")}
+              name="titular"
+              required
+              autoComplete="cc-name"
+              maxLength={120}
+            />
           </div>
-          {erroresCampos.expirationDate && <p role="alert">{erroresCampos.expirationDate}</p>}
-          {erroresCampos.securityCode && <p role="alert">{erroresCampos.securityCode}</p>}
+          <div>
+            <span>Número de tarjeta</span>
+            <div id={id("numero")} className="mp-campo-seguro" />
+          </div>
+          {erroresCampos.cardNumber && (
+            <p role="alert">{erroresCampos.cardNumber}</p>
+          )}
+          <div className="tarjeta-fila">
+            <div>
+              <span>Vencimiento</span>
+              <div id={id("vencimiento")} className="mp-campo-seguro" />
+            </div>
+            <div>
+              <span>Código de seguridad</span>
+              <div id={id("cvv")} className="mp-campo-seguro" />
+            </div>
+          </div>
+          {erroresCampos.expirationDate && (
+            <p role="alert">{erroresCampos.expirationDate}</p>
+          )}
+          {erroresCampos.securityCode && (
+            <p role="alert">{erroresCampos.securityCode}</p>
+          )}
           <div>
             <label htmlFor={id("emisor")}>Banco</label>
-            <select id={id("emisor")} value={emisor} disabled={!metadatos} onChange={e => { setEmisor(e.target.value); setCuotas(""); }}>
-              {!metadatos?.emisores.length && <option value="">Se identifica con la tarjeta</option>}
-              {metadatos?.emisores.map(b => <option key={b.id} value={String(b.id)}>{b.name}</option>)}
+            <select
+              id={id("emisor")}
+              value={emisor}
+              disabled={!metadatos}
+              onChange={(e) => {
+                setEmisor(e.target.value);
+                setCuotas("");
+              }}
+            >
+              {!metadatos?.emisores.length && (
+                <option value="">Se identifica con la tarjeta</option>
+              )}
+              {metadatos?.emisores.map((b) => (
+                <option key={b.id} value={String(b.id)}>
+                  {b.name}
+                </option>
+              ))}
             </select>
           </div>
           <div>
             <label htmlFor={id("cuotas")}>Número de pagos</label>
-            <select id={id("cuotas")} value={cuotas} required disabled={!metadatos} onChange={e => setCuotas(e.target.value)}>
+            <select
+              id={id("cuotas")}
+              value={cuotas}
+              required
+              disabled={!metadatos}
+              onChange={(e) => setCuotas(e.target.value)}
+            >
               <option value="">Selecciona una opción</option>
-              {costos.map((p, i) => <option key={`${p.installments}-${i}`} value={String(p.installments)}>{p.recommended_message}</option>)}
+              {costos.map((p, i) => (
+                <option
+                  key={`${p.installments}-${i}`}
+                  value={String(p.installments)}
+                >
+                  {p.recommended_message}
+                </option>
+              ))}
             </select>
           </div>
           {!listo && !error && <p role="status">Cargando formulario…</p>}
           {cargando && <p role="status">Consultando opciones de la tarjeta…</p>}
-          {error && <div role="alert"><p>{error}</p><button type="button" onClick={() => setRevision(n => n + 1)}>Recargar formulario</button></div>}
-          <button type="submit" className="btn" disabled={!listo || !metadatos || !cuotas || cargando || procesando || enviandoToken || Object.keys(erroresCampos).length > 0}>
-            {procesando || enviandoToken ? "Procesando…" : `Pagar $${importe} MXN`}
+          {error && (
+            <div role="alert">
+              <p>{error}</p>
+              <button type="button" onClick={() => setRevision((n) => n + 1)}>
+                Recargar formulario
+              </button>
+            </div>
+          )}
+          <button
+            type="submit"
+            className="btn"
+            disabled={
+              !listo ||
+              !metadatos ||
+              !cuotas ||
+              cargando ||
+              procesando ||
+              enviandoToken ||
+              Object.keys(erroresCampos).length > 0
+            }
+          >
+            {procesando || enviandoToken
+              ? "Procesando…"
+              : `Pagar $${importe} MXN`}
           </button>
         </fieldset>
       </form>

@@ -78,6 +78,18 @@ type Pedido {
   email: String!
   """Dirección capturada en checkout."""
   direccion: String!
+  """Número de guía registrado en 17TRACK."""
+  trackingNumber: String
+  """Paquetería elegida por administración."""
+  trackingCarrierName: String
+  """Código del transportista en 17TRACK, cuando se especifica."""
+  trackingCarrierId: Int
+  """Estado del envío reportado por 17TRACK."""
+  trackingStatus: String
+  """Último evento logístico recibido."""
+  trackingDescription: String
+  """Fecha de la última consulta de seguimiento."""
+  trackingUpdatedAt: String
   """Pago al recibir, sin cobro real."""
   metodoPago: String!
   """Estado derivado del proveedor registrado; no representa una confirmación manual."""
@@ -303,6 +315,10 @@ type Mutation {
   """Crea el pedido y descuenta stock en una transacción atómica."""
   crearPedido(datos: PedidoInput!): Pedido!
   actualizarEstadoPedido(id: Int!, estado: EstadoPedido!, motivo: String): Pedido!
+  """Registra una guía en 17TRACK y la vincula al pedido; requiere rol ADMIN."""
+  registrarRastreoPedido(id: Int!, numeroGuia: String!, transportista: String!, codigoTransportista: Int): Pedido!
+  """Actualiza el estado desde 17TRACK; requiere rol ADMIN."""
+  consultarRastreoPedido(id: Int!): Pedido!
   ajustarInventario(productoId: Int!, cantidad: Int!, tipo: TipoMovimientoInventario!, motivo: String!): Producto!
   crearCategoria(nombre: String!): CategoriaAdmin!
   actualizarCategoria(id: Int!, nombre: String!): CategoriaAdmin!

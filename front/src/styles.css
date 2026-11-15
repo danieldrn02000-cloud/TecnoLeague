@@ -2491,6 +2491,35 @@ tr:last-child td {
   color: var(--muted);
   font-size: 0.76rem;
 }
+.admin-tracking-form {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  margin: 18px 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.admin-tracking-form > label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.admin-tracking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.pedido-rastreo {
+  display: grid;
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.pedido-rastreo small {
+  color: var(--muted);
+}
 .admin-order-total {
   padding: 15px 0;
   display: flex;
@@ -2681,7 +2710,7 @@ tr:last-child td {
   padding: 10px;
   border: 1px solid #888;
   border-radius: 6px;
-  background: #fff;
+  background: #ffffff;
 }
 
 .tarjeta-fila {

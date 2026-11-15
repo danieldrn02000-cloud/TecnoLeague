@@ -38,6 +38,11 @@ export interface Pedido {
   email: string;
   direccion: string;
   metodoPago: string;
+  trackingNumber: string | null;
+  trackingCarrierName: string | null;
+  trackingStatus: string | null;
+  trackingDescription: string | null;
+  trackingUpdatedAt: string | null;
   detalles: {
     id: number;
     cantidad: number;

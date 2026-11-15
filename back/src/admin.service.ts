@@ -10,6 +10,7 @@ import { PrismaService } from "./prisma.service";
 import { fallo } from "./tienda.service";
 import { EventosService } from "./eventos.service";
 import { errorCatalogo } from "./catalogo-error";
+import { Tracking17Service } from "./tracking17.service";
 
 const incluirPedido = {
   detalles: { include: { producto: { include: { categoria: true } } } },
@@ -47,6 +48,7 @@ export class AdminService {
   constructor(
     private readonly db: PrismaService,
     private readonly eventos: EventosService, //agregamos eventos al constructor
+    private readonly tracking: Tracking17Service,
   ) {}
 
   async dashboard(desde: string, hasta: string) {
@@ -326,6 +328,80 @@ export class AdminService {
       include: incluirPedido,
     });
     return pedido ?? fallo("El pedido no existe.");
+  }
+
+  async registrarRastreoPedido(
+    id: number,
+    numeroGuia: string,
+    transportista: string,
+    codigoTransportista?: number | null,
+  ) {
+    if (!Number.isInteger(id) || id < 1) fallo("Pedido inválido.");
+    const numero = numeroGuia.trim().toUpperCase();
+    const nombre = transportista.trim();
+    if (!/^[A-Z0-9-]{5,50}$/.test(numero))
+      fallo("La guía debe tener entre 5 y 50 letras, números o guiones.");
+    if (!nombre || nombre.length > 80)
+      fallo("Escribe el nombre de la paquetería (máximo 80 caracteres).");
+    if (
+      codigoTransportista != null &&
+      (!Number.isInteger(codigoTransportista) ||
+        codigoTransportista < 1 ||
+        codigoTransportista > 2147483647)
+    )
+      fallo("El código del transportista debe ser un entero positivo.");
+    if (!(await this.db.pedido.findUnique({ where: { id }, select: { id: true } })))
+      fallo("El pedido no existe.");
+
+    const carrierId = await this.tracking.register(
+      numero,
+      codigoTransportista ?? null,
+    );
+    const pedido = await this.db.pedido.update({
+      where: { id },
+      data: {
+        trackingNumber: numero,
+        trackingCarrierName: nombre,
+        trackingCarrierId: carrierId,
+        trackingStatus: null,
+        trackingDescription: null,
+        trackingUpdatedAt: null,
+      },
+      include: incluirPedido,
+    });
+    await this.eventos.publicarBackOffice({
+      entidad: "PEDIDO",
+      entidadId: id,
+      accion: "ACTUALIZADO",
+    });
+    return pedido;
+  }
+
+  async consultarRastreoPedido(id: number) {
+    if (!Number.isInteger(id) || id < 1) fallo("Pedido inválido.");
+    const pedido = await this.db.pedido.findUnique({ where: { id } });
+    if (!pedido) fallo("El pedido no existe.");
+    if (!pedido.trackingNumber) fallo("Este pedido todavía no tiene guía.");
+    const actualizacion = await this.tracking.getTracking(
+      pedido.trackingNumber,
+      pedido.trackingCarrierId,
+    );
+    const actualizado = await this.db.pedido.update({
+      where: { id },
+      data: {
+        trackingCarrierId: actualizacion.carrierId,
+        trackingStatus: actualizacion.status,
+        trackingDescription: actualizacion.description,
+        trackingUpdatedAt: actualizacion.updatedAt,
+      },
+      include: incluirPedido,
+    });
+    await this.eventos.publicarBackOffice({
+      entidad: "PEDIDO",
+      entidadId: id,
+      accion: "ACTUALIZADO",
+    });
+    return actualizado;
   }
 
   async clientes(buscar = "", desde = 0, limite = 20) {

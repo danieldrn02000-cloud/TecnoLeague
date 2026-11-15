@@ -3,6 +3,7 @@ import { PagosResolver } from "./pagos.resolver";
 import { Module } from "@nestjs/common";
 import { GraphQLModule } from "@nestjs/graphql";
 import { ApolloDriver, ApolloDriverConfig } from "@nestjs/apollo";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PrismaService } from "./prisma.service";
 import { AuthService } from "./auth.service";
@@ -27,6 +28,7 @@ import { EventosService } from "./eventos.service";
 import type { RequestContext } from "./types";
 import { ImagenesController } from "./imagenes.controller";
 import { idDiagnostico, opcionesBackOfficeWs } from "./backoffice-diagnostics";
+import { Tracking17Service } from "./tracking17.service";
 
 import {
   AuthResolver,
@@ -42,7 +44,7 @@ import {
   imports: [
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
-      typePaths: [join(__dirname, "schema.graphql")],
+      typeDefs: readFileSync(join(__dirname, "schema.graphql"), "utf8"),
       path: "/graphql",
       graphiql: true,
       introspection: true,
@@ -116,6 +118,7 @@ import {
     BackOfficeSubscriptionGuard,
     MercadoPagoOrdersService,
     PayPalService,
+    Tracking17Service,
   ],
   controllers: [PagosController, ImagenesController],
 })

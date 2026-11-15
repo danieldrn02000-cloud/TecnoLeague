@@ -202,6 +202,10 @@ export class CategoriaResolver {
 @Resolver("Pedido")
 export class PedidoResolver {
   constructor(private readonly db: PrismaService) {}
+  @ResolveField("trackingUpdatedAt")
+  trackingUpdatedAt(@Parent() pedido: { trackingUpdatedAt: Date | null }) {
+    return pedido.trackingUpdatedAt?.toISOString() ?? null;
+  }
   @ResolveField("estadoPago")
   async estadoPago(@Parent() pedido: Pedido & { pagos?: { estado: string }[] }) {
     const pagos =
