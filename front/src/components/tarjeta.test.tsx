@@ -14,23 +14,24 @@ function sdkSimulado() {
   const getPaymentMethods = vi.fn(async (): Promise<{ results: MetodoTarjeta[] }> => ({ results: [{ id: "visa", name: "Visa", payment_type_id: "debit_card" }] }));
   const getIssuers = vi.fn(async () => [{ id: "1", name: "Banco de prueba" }]);
   const getInstallments = vi.fn(async () => [{ payment_method_id: "master", payer_costs: [{ installments: 1, recommended_message: "Un pago" }, { installments: 3, recommended_message: "Tres cuotas" }] }]);
+  const create = vi.fn((tipo: string) => {
+    const eventos = new Map<string, (event: Evento) => void>();
+    listeners.set(tipo, eventos);
+    const campo: CampoSeguro = {
+      on: (evento, callback) => { eventos.set(evento, callback); },
+      mount: () => { eventos.get("ready")?.({}); return campo; },
+      update: vi.fn(), unmount,
+    };
+    return campo;
+  });
   vi.mocked(obtenerMercadoPago).mockResolvedValue({
     fields: {
-      create: tipo => {
-        const eventos = new Map<string, (event: Evento) => void>();
-        listeners.set(tipo, eventos);
-        const campo: CampoSeguro = {
-          on: (evento, callback) => { eventos.set(evento, callback); },
-          mount: () => { eventos.get("ready")?.({}); return campo; },
-          update: vi.fn(), unmount,
-        };
-        return campo;
-      },
+      create,
       createCardToken,
     },
     getPaymentMethods, getIssuers, getInstallments,
   });
-  return { listeners, unmount, createCardToken, getPaymentMethods, getIssuers, getInstallments };
+  return { listeners, unmount, create, createCardToken, getPaymentMethods, getIssuers, getInstallments };
 }
 
 it("tokeniza en campos seguros sin correo ni documento y bloquea el doble envío", async () => {
@@ -39,6 +40,11 @@ it("tokeniza en campos seguros sin correo ni documento y bloquea el doble envío
   const onToken = vi.fn(() => new Promise<void>(resolve => { terminar = resolve; }));
   const view = render(<FormularioTarjeta importe="99.00" onToken={onToken} />);
   await waitFor(() => expect(sdk.listeners.size).toBe(3));
+  for (const tipo of ["cardNumber", "expirationDate", "securityCode"]) {
+    expect(sdk.create).toHaveBeenCalledWith(tipo, expect.objectContaining({
+      style: expect.objectContaining({ color: "#ffffff", placeholderColor: "#a3b5cb" }),
+    }));
+  }
   await act(async () => { sdk.listeners.get("cardNumber")!.get("binChange")!({ bin: "41111111" }); });
   const boton = screen.getByRole("button", { name: "Pagar $99.00 MXN" });
   await waitFor(() => expect((boton as HTMLButtonElement).disabled).toBe(false));

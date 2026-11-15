@@ -80,10 +80,19 @@ export function FormularioTarjeta({
         const tipos = ["cardNumber", "expirationDate", "securityCode"] as const;
         const nombres = ["numero", "vencimiento", "cvv"];
         const textos = ["Número de tarjeta", "MM/AA", "Código de seguridad"];
-        
         let preparados = 0;
         for (const [indice, tipo] of tipos.entries()) {
-          const campo = mp.fields.create(tipo, { placeholder: textos[indice] });
+          const campo = mp.fields.create(tipo, {
+            placeholder: textos[indice],
+            // Estos estilos se aplican dentro del iframe de Mercado Pago;
+            // el CSS de TecnoLeague solo puede estilizar su contenedor.
+            style: {
+              color: "#ffffff",
+              placeholderColor: "#a3b5cb",
+              fontSize: "16px",
+              fontFamily: "Arial, sans-serif",
+            },
+          });
           campos.push(campo);
           campo.on("ready", () => {
             if (activo && ++preparados === 3) setListo(true);

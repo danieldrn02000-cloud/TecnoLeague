@@ -2704,13 +2704,18 @@ tr:last-child td {
   padding: 10px;
 }
 
+.tarjeta-form input[name="titular"],
+.mp-campo-seguro {
+  background: #243247;
+  color: #ffffff;
+  border: 1px solid #304056;
+  border-radius: 4px;
+}
+
 .mp-campo-seguro {
   box-sizing: border-box;
   height: 44px;
   padding: 10px;
-  border: 1px solid #888;
-  border-radius: 6px;
-  background: #ffffff;
 }
 
 .tarjeta-fila {

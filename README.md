@@ -35,6 +35,14 @@ Solo una sesión ADMIN puede subir archivos. El backend comprueba el formato rea
 
 Por defecto se guardan en `back/uploads/`, que Git ignora. No borres esa carpeta y respáldala junto con la base de datos. Puedes definir `IMAGE_UPLOAD_DIR` en el backend para utilizar otro directorio persistente. En Render u otro alojamiento con disco efímero debes montar almacenamiento persistente y configurar esa variable; Neon guarda las rutas, no los archivos. Varias instancias del backend necesitan compartir el almacenamiento. Una imagen subida cuyo formulario se cancela puede quedar sin asociar a un producto.
 
+Para Render + Netlify:
+
+1. En el servicio del **backend de Render**, monta un disco persistente en `/var/data` y configura `IMAGE_UPLOAD_DIR=/var/data/tecnoleague/imagenes`. El directorio por sí solo no crea el disco: necesitas un plan de Render que admita discos persistentes.
+2. Si ya hay imágenes en `back/uploads/`, cópialas al nuevo directorio conservando sus nombres antes de cambiar la variable. Cambiar el directorio no mueve los archivos existentes.
+3. En Netlify conserva `BACKEND_GRAPHQL_URL=https://TU_BACKEND.onrender.com/graphql`. Todas las subidas se reenvían a ese backend; no se guardan en el disco de Netlify ni en el navegador.
+4. Al guardar el producto se persiste la ruta `/images/uploads/UUID.png` o `.jpg` en `productos.imagen`. La ruta pública de Astro obtiene el archivo desde `GET /imagenes/:archivo` en NestJS sin exigir sesión, por lo que cualquier visitante puede verlo.
+5. Comprueba la URL de la imagen en una ventana privada y tras un nuevo despliegue del backend. Ambos deben mostrar el mismo archivo. La base de datos y el directorio de imágenes deben conservarse juntos.
+
 ## Categorías, productos y contadores de IDs
 
 Un `P2002` de PostgreSQL puede indicar un ID repetido, aunque el nombre sea nuevo. Esto ocurre al importar filas con IDs explícitos sin adelantar sus secuencias. Ahora se distingue el nombre duplicado del contador desincronizado y de los errores de conexión o estructura.

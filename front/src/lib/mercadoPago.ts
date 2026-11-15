@@ -26,7 +26,15 @@ export type PlanCuotas = {
 };
 export type InstanciaMercadoPago = {
   fields: {
-    create(tipo: "cardNumber" | "expirationDate" | "securityCode", opciones: { placeholder: string }): CampoSeguro;
+    create(tipo: "cardNumber" | "expirationDate" | "securityCode", opciones: {
+      placeholder: string;
+      style?: {
+        color?: string;
+        placeholderColor?: string;
+        fontSize?: string;
+        fontFamily?: string;
+      };
+    }): CampoSeguro;
     createCardToken(datos: { cardholderName: string }): Promise<{ id: string } | undefined>;
   };
   getPaymentMethods(datos: { bin: string }): Promise<{ results: MetodoTarjeta[] }>;
