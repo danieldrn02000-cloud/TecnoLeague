@@ -80,6 +80,7 @@ export function FormularioTarjeta({
         const tipos = ["cardNumber", "expirationDate", "securityCode"] as const;
         const nombres = ["numero", "vencimiento", "cvv"];
         const textos = ["Número de tarjeta", "MM/AA", "Código de seguridad"];
+        
         let preparados = 0;
         for (const [indice, tipo] of tipos.entries()) {
           const campo = mp.fields.create(tipo, { placeholder: textos[indice] });
