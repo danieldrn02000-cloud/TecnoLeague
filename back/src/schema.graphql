@@ -257,6 +257,12 @@ input RegistroInput {
   password: String!
 }
 """Credenciales de acceso de un cliente."""
+input GoogleInput {
+  credential: String!
+  nonce: String!
+  password: String
+}
+
 input CredencialesInput {
   email: String!
   password: String!
@@ -298,6 +304,7 @@ type Mutation {
   registrarUsuario(datos: RegistroInput!): Sesion!
   """Valida credenciales y devuelve un token para el servidor Astro."""
   iniciarSesion(datos: CredencialesInput!): Sesion!
+  iniciarSesionGoogle(datos: GoogleInput!): Sesion!
   """Envía un código sin revelar si el correo está registrado."""
   solicitarRecuperacion(email: String!): SolicitudRecuperacion!
   """Canjea un código válido por un permiso breve para cambiar la contraseña."""

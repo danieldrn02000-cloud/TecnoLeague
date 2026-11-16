@@ -12,6 +12,8 @@ import {
 import { PrismaService } from "./prisma.service";
 import { CredencialesInput, RegistroInput, RequestContext } from "./types";
 import { PasswordRecoveryService } from "./password-recovery.service";
+import { GoogleIdentityService } from "./google-identity.service";
+import type { GoogleInput } from "./types";
 
 const HASH_DE_RELLENO = `scrypt$16384$8$1$${Buffer.alloc(16).toString("base64url")}$${Buffer.alloc(64).toString("base64url")}`;
 const derivarClave = (password: string, salt: string) =>
@@ -51,6 +53,7 @@ export class AuthService {
   constructor(
     private readonly db: PrismaService,
     private readonly jwt: JwtService,
+    private readonly google: GoogleIdentityService = new GoogleIdentityService(),
   ) {}
 
   //verifica datos del usuario
@@ -109,6 +112,49 @@ export class AuthService {
       token: this.crearToken(usuario.id, usuario.versionSesion),
       usuario: this.publico(usuario),
     };
+  }
+
+  async iniciarSesionGoogle(datos: GoogleInput) {
+    const identidad = await this.google.verificar(datos.credential, datos.nonce);
+    const sesion = (usuario: Usuario) => ({
+      token: this.crearToken(usuario.id, usuario.versionSesion),
+      usuario: this.publico(usuario),
+    });
+    // La restricción única y la actualización condicional evitan duplicados
+    // y que dos solicitudes vinculen identidades distintas a la misma cuenta.
+    for (let intento = 0; intento < 2; intento++) {
+      const vinculado = await this.db.usuario.findUnique({ where: { googleSubject: identidad.subject } });
+      if (vinculado) return sesion(vinculado);
+      const existente = await this.db.usuario.findUnique({ where: { email: identidad.email } });
+      if (existente) {
+        if (existente.googleSubject || !existente.passwordHash) {
+          fallo("No pudimos vincular esta cuenta. Inicia sesión con tu método habitual.", "CONFLICT");
+        }
+        if (!datos.password || datos.password.length > 128 ||
+            !await this.compararPassword(datos.password, existente.passwordHash)) {
+          fallo("Para vincular Google, confirma la contraseña actual de tu cuenta de TecnoLeague.", "GOOGLE_LINK_REQUIRED");
+        }
+        try {
+          const cambio = await this.db.usuario.updateMany({
+            where: { id: existente.id, googleSubject: null, passwordHash: existente.passwordHash, versionSesion: existente.versionSesion },
+            data: { googleSubject: identidad.subject },
+          });
+          if (cambio.count === 1) return sesion(existente);
+        } catch (error) {
+          if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+        }
+        continue;
+      }
+      try {
+        return sesion(await this.db.usuario.create({
+          data: { nombre: identidad.nombre, email: identidad.email, googleSubject: identidad.subject, rol: "CLIENTE" },
+        }));
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") continue;
+        throw error;
+      }
+    }
+    fallo("Tu cuenta cambió mientras iniciabas sesión. Inténtalo de nuevo.", "CONFLICT");
   }
 
   //delega esta función a passwordRecoveryService y envia el email

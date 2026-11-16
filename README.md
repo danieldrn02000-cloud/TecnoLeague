@@ -27,6 +27,8 @@ Astro escucha en todas las interfaces. Las consultas, las imágenes y las actual
 
 En Netlify, configura `BACKEND_GRAPHQL_URL=https://TU_BACKEND.onrender.com/graphql` para el build y las Functions y vuelve a desplegar. Las actualizaciones en vivo usan automáticamente `wss://TU_BACKEND.onrender.com/graphql`: no necesitas `PUBLIC_BACKOFFICE_WS_URL`. Esa variable es opcional si tu WebSocket usa otra dirección pública. El navegador conecta directamente a NestJS con un ticket temporal; Netlify no hospeda ni reenvía el WebSocket. Render debe admitir conexiones persistentes. Los valores `localhost` de los ejemplos y del proxy son para desarrollo; en producción ya no se usa una dirección local implícita si falta `BACKEND_GRAPHQL_URL`.
 
+Para habilitar **Continuar con Google**, consulta [la configuración de Google Identity](docs/GOOGLE_IDENTITY.md). La integración es opcional y conserva el acceso por contraseña y los pedidos existentes.
+
 ## Añadir imágenes
 
 En **Administración → Productos → Nuevo producto / Editar producto**, pulsa **Añadir imagen** y selecciona un archivo `.jpg`, `.jpeg` o `.png` de hasta 5 MB. Espera a que termine la subida y guarda el producto. También puedes conservar una ruta `/images/archivo` o una URL HTTPS.

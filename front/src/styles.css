@@ -2704,6 +2704,14 @@ tr:last-child td {
   padding: 10px;
 }
 
+.google-access {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #304056;
+}
+
 .tarjeta-form input[name="titular"],
 .mp-campo-seguro {
   background: #243247;

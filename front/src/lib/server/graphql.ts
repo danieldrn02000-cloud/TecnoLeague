@@ -91,7 +91,7 @@ export async function authenticate(
   cookies: CookieJar,
   query: string,
   datos: Record<string, string>,
-  operation: "registrarUsuario" | "iniciarSesion",
+  operation: "registrarUsuario" | "iniciarSesion" | "iniciarSesionGoogle",
 ) {
   if (!mismoOrigen(request)) {
     return Response.json({ error: "Solicitud no permitida." }, { status: 403 });
@@ -104,7 +104,7 @@ export async function authenticate(
     if (!sesion?.token || !sesion.usuario) {
       const error = body.errors?.[0];
       return Response.json(
-        { error: error?.message ?? "No se pudo iniciar la sesión." },
+        { error: error?.message ?? "No se pudo iniciar la sesión.", code: error?.extensions?.code },
         { status: errorStatus(error, status) },
       );
     }
@@ -132,6 +132,8 @@ export async function authenticate(
 }
 
 export function errorStatus(error: BackendError | undefined, status: number) {
+  if (error?.extensions?.code === "GOOGLE_LINK_REQUIRED") return 409;
+  if (error?.extensions?.code === "GOOGLE_UNAVAILABLE") return 503;
   if (error?.extensions?.code === "UNAUTHENTICATED") return 401;
   if (error?.extensions?.code === "CONFLICT") return 409;
   if (error?.extensions?.code === "BAD_USER_INPUT") return 400;

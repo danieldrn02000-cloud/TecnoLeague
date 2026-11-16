@@ -23,6 +23,7 @@ import { AuthService } from "./auth.service";
 import { TiendaService } from "./tienda.service";
 import {
   CredencialesInput,
+  GoogleInput,
   PedidoInput,
   ProductoInput,
   RegistroInput,
@@ -70,6 +71,14 @@ export class AuthResolver {
     return this.auth.iniciarSesion(datos);
   }
 
+
+  @Mutation("iniciarSesionGoogle") iniciarSesionGoogle(
+    @Args("datos") datos: GoogleInput,
+    @Context() ctx: RequestContext,
+  ) {
+    exigirPuenteAuth(ctx);
+    return this.auth.iniciarSesionGoogle(datos);
+  }
 
   @Mutation("solicitarRecuperacion") solicitarRecuperacion(@Args("email") email: string, @Context() ctx: RequestContext) {
     exigirPuenteAuth(ctx);

@@ -23,6 +23,12 @@ export interface RegistroInput {
   email: string;
   password: string;
 }
+export interface GoogleInput {
+  credential: string;
+  nonce: string;
+  password?: string;
+}
+
 export interface CredencialesInput {
   email: string;
   password: string;

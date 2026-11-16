@@ -3,15 +3,12 @@ import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AuthForm } from "./AuthForm";
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
-it("recuerda solo el correo y lo elimina al desmarcar la casilla", () => {
+it("recupera el correo guardado sin rellenar la contraseña ni restaurar la casilla retirada", () => {
   localStorage.setItem("tl_email_recordado", "recordado@example.test");
   render(<AuthForm mode="login" next="/" />);
   expect((screen.getByLabelText("Correo electrónico") as HTMLInputElement).value).toBe("recordado@example.test");
   expect((screen.getByLabelText("Contraseña") as HTMLInputElement).value).toBe("");
-  const checkbox = screen.getByLabelText("Recordar mi correo") as HTMLInputElement;
-  expect(checkbox.checked).toBe(true);
-  fireEvent.click(checkbox);
-  expect(localStorage.getItem("tl_email_recordado")).toBeNull();
+  expect(screen.queryByRole("checkbox")).toBeNull();
 });
 it("el enlace de recuperación no envía el formulario de acceso", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "Espera un minuto." }, { status: 429 })));

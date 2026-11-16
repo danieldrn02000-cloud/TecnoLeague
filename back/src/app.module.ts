@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PrismaService } from "./prisma.service";
 import { AuthService } from "./auth.service";
+import { GoogleIdentityService } from "./google-identity.service";
 import { TiendaService } from "./tienda.service";
 import { JwtModule } from "@nestjs/jwt";
 import { PagosController } from "./pagos.controller";
@@ -104,6 +105,7 @@ import {
     PagoPedidoResolver,
     PrismaService,
     AuthService,
+    GoogleIdentityService,
     TiendaService,
     AuthResolver,
     TiendaResolver,
