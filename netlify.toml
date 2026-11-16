@@ -1,0 +1,10 @@
+[build]
+  base = "front"
+  command = "npm run build"
+  publish = "dist"
+  # Los builds automáticos por Git se omiten: Actions publica con Netlify CLI
+  # después de aprobar CI. No detener todos los builds desde el panel de Netlify.
+  ignore = "exit 0"
+
+[build.environment]
+  NODE_VERSION = "22"

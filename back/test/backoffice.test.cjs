@@ -24,7 +24,7 @@ const { PrismaService } = require("../dist/prisma.service");
 const { PagosService } = require("../dist/pagos.service");
 const { TiendaService } = require("../dist/tienda.service");
 const { AdminService } = require("../dist/admin.service");
-const { JwtService } = require("@nestjs/jwt");
+const { AuthService } = require("../dist/auth.service");
 const query =
   "subscription { backOfficeActualizado { eventoId entidad entidadId accion ocurridoEn } }";
 
@@ -44,14 +44,11 @@ test(
       const admin = await db.usuario.findUniqueOrThrow({
         where: { email: process.env.ADMIN_EMAIL},
       });
-      const token = app
-        .get(JwtService)
-        .sign({ sub: admin.id }, { expiresIn: "5m" });
       const client = createClient({
         url: `ws://127.0.0.1:${port}/graphql`,
         webSocketImpl: WebSocket,
         retryAttempts: 0,
-        connectionParams: { authorization: `Bearer ${token}` },
+        connectionParams: { ticket: app.get(AuthService).crearTicketBackOffice(admin.id).ticket },
       });
       clientes.push(client);
       let listo;
@@ -95,16 +92,16 @@ test(
             rol: "CLIENTE",
           },
         });
-        for (const authorization of [
+        for (const ticket of [
           undefined,
           "Bearer invalido",
-          `Bearer ${app.get(JwtService).sign({ sub: comprador.id }, { expiresIn: "5m" })}`,
+          app.get(AuthService).crearTicketBackOffice(comprador.id).ticket,
         ]) {
           const c = createClient({
             url: `ws://127.0.0.1:${port}/graphql`,
             webSocketImpl: WebSocket,
             retryAttempts: 0,
-            connectionParams: authorization ? { authorization } : {},
+            connectionParams: ticket ? { ticket } : {},
           });
           clientes.push(c);
           await assert.rejects(async () => {

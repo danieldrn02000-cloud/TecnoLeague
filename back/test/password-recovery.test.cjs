@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { randomUUID } = require("node:crypto");
+const { randomUUID, createHash } = require("node:crypto");
 require("reflect-metadata");
 const { JwtService } = require("@nestjs/jwt");
 const { AuthService } = require("../dist/auth.service");
@@ -19,7 +19,7 @@ test("Recuperación por código y Resend con PostgreSQL", { skip: !process.env.A
   const mock = t.mock.method(globalThis, "fetch", async (url, opciones) => {
     assert.equal(url, "https://api.resend.com/emails");
     const cuerpo = JSON.parse(opciones.body);
-    enviados.push({ cuerpo, codigo: cuerpo.text.match(/\b\d{6}\b/)[0] });
+    enviados.push({ cuerpo, codigo: cuerpo.text.match(/\b\d{6}\b/)[0], tokenHash: opciones.headers["Idempotency-Key"].slice(6) });
     return new Response(JSON.stringify({ id: "correo-prueba" }));
   });
   t.after(async () => {
@@ -63,14 +63,18 @@ test("Recuperación por código y Resend con PostgreSQL", { skip: !process.env.A
     const { email } = await cuenta();
     const anterior = await auth.solicitarRecuperacion(email);
     const codigo = enviados.at(-1).codigo;
-    await assert.rejects(auth.solicitarRecuperacion(email), /Espera un minuto/);
+    // El servicio actual permite reenviar inmediatamente e invalida el anterior.
+    const inmediato = await auth.solicitarRecuperacion(email);
+    assert.notEqual(inmediato.solicitudId, anterior.solicitudId);
+    await assert.rejects(auth.verificarCodigoRecuperacion(anterior.solicitudId, codigo));
     await db.tokenRecuperacion.updateMany({ where: { email }, data: { expiraEn: new Date(0), creadoEn: new Date(Date.now()-61_000) } });
     await assert.rejects(auth.verificarCodigoRecuperacion(anterior.solicitudId, codigo));
     const nuevo = await auth.solicitarRecuperacion(email);
     await assert.rejects(auth.verificarCodigoRecuperacion(anterior.solicitudId, codigo));
     const token = await auth.verificarCodigoRecuperacion(nuevo.solicitudId, enviados.at(-1).codigo);
     assert.equal(typeof token, "string");
-    for (let i=0;i<3;i++) {
+    // Tres solicitudes anteriores + siete nuevas alcanzan el límite actual de diez.
+    for (let i=0;i<7;i++) {
       await db.tokenRecuperacion.updateMany({ where: { email }, data: { creadoEn: new Date(Date.now()-61_000) } });
       await auth.solicitarRecuperacion(email);
     }
@@ -98,9 +102,12 @@ test("Recuperación por código y Resend con PostgreSQL", { skip: !process.env.A
   await t.test("dos verificaciones y cambios concurrentes solo consumen una vez el permiso", async () => {
     const { email } = await cuenta();
     const solicitudes = await Promise.allSettled([auth.solicitarRecuperacion(email), auth.solicitarRecuperacion(email)]);
-    assert.equal(solicitudes.filter(r => r.status === "fulfilled").length, 1);
-    const solicitudId = solicitudes.find(r => r.status === "fulfilled").value.solicitudId;
-    const codigo = enviados.at(-1).codigo;
+    assert.equal(solicitudes.filter(r => r.status === "fulfilled").length, 2);
+    const activos = await db.tokenRecuperacion.findMany({ where: { email, usadoEn: null } });
+    assert.equal(activos.length, 1, "El reenvío simultáneo conserva un solo código activo");
+    const registro = activos[0];
+    const solicitudId = solicitudes.find(r => createHash("sha256").update(r.value.solicitudId).digest("hex") === registro.tokenHash).value.solicitudId;
+    const codigo = enviados.find(e => e.tokenHash === registro.tokenHash).codigo;
     const verificaciones = await Promise.allSettled([
       auth.verificarCodigoRecuperacion(solicitudId, codigo), auth.verificarCodigoRecuperacion(solicitudId, codigo),
     ]);

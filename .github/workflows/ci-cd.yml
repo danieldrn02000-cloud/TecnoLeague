@@ -1,0 +1,146 @@
+name: TecnoLeague CI-CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tecnoleague-${{ github.ref }}
+  # Una publicación iniciada termina antes de comenzar la siguiente.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: Validar, probar y construir
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: tecnoleague_ci
+          POSTGRES_USER: tecnoleague
+          POSTGRES_PASSWORD: ci-local-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tecnoleague -d tecnoleague_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CI: "true"
+      DATABASE_URL: postgresql://tecnoleague:ci-local-only@127.0.0.1:5432/tecnoleague_ci?schema=public
+      AUTH_TEST_DATABASE_URL: postgresql://tecnoleague:ci-local-only@127.0.0.1:5432/tecnoleague_ci?schema=public
+      ORDERS_TEST_DATABASE_URL: postgresql://tecnoleague:ci-local-only@127.0.0.1:5432/tecnoleague_ci?schema=public
+      PAYPAL_TEST_DATABASE_URL: postgresql://tecnoleague:ci-local-only@127.0.0.1:5432/tecnoleague_ci?schema=public
+      JWT_SECRET: ci-only-jwt-secret-never-use-in-production-123456
+      AUTH_BRIDGE_SECRET: ci-only-auth-bridge-never-use-in-production-123456
+      ADMIN_EMAIL: admin-ci@tecnoleague.test
+      ADMIN_PASSWORD: Admin-ci-only-123456
+      MP_RECONCILIATION_DISABLED: "1"
+      BACKEND_GRAPHQL_URL: http://127.0.0.1:4000/graphql
+      ASTRO_TELEMETRY_DISABLED: "1"
+      NETLIFY: "true"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Instalar dependencias reproducibles
+        run: npm ci
+      - name: Validar esquema y generar Prisma
+        run: |
+          npx prisma validate --schema back/prisma/schema.prisma
+          npm run db:generate
+      - name: Analizar calidad con ESLint
+        run: npm run lint
+      - name: Preparar PostgreSQL desechable
+        run: |
+          npm run db:migrate
+          npm run db:seed
+          mkdir -p reports
+      - name: Construir backend
+        run: npm run build -w back
+      - name: Pruebas de recuperación del checkout
+        run: node --test scripts/test-checkout-recuperacion.cjs
+      - name: Pruebas de backend con PostgreSQL y proveedores simulados
+        run: >-
+          node --test --test-concurrency=1
+          --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=junit --test-reporter-destination=reports/backend.xml
+          back/test/*.test.cjs
+      - name: Pruebas del frontend
+        run: npm run test -w front -- --reporter=default --reporter=junit --outputFile.junit=../reports/frontend.xml
+      - name: Integración real de WebSocket y BackOffice
+        run: npm run test -w front -- --config vitest.backoffice.config.ts --reporter=default --reporter=junit --outputFile.junit=../reports/backoffice.xml
+      - name: Probar automatización del despliegue sin servicios reales
+        run: node --test scripts/test-deploy-render.mjs
+      - name: Generar build de producción Astro y Netlify Functions
+        run: npm run build -w front
+      - name: Conservar informes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ github.sha }}
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Conservar build validado
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-build-${{ github.sha }}
+          include-hidden-files: true
+          path: |
+            back/dist/
+            front/dist/
+            front/.netlify/
+          retention-days: 7
+
+  deploy:
+    name: Publicar en producción
+    needs: validate
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main' && vars.CD_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_SITE_URL }}
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}
+      PRODUCTION_SITE_URL: ${{ vars.PRODUCTION_SITE_URL }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Comprobar configuración antes de publicar
+        run: node scripts/deploy-render.mjs --check
+      - name: Instalar dependencias del commit validado
+        run: npm ci
+      - name: Desplegar el commit validado en Render y esperar a que esté activo
+        run: node scripts/deploy-render.mjs
+      - name: Construir y publicar Netlify con su configuración de producción
+        # El CLI recupera las variables del sitio. Ningún secreto de la aplicación
+        # se incorpora a los artefactos públicos del job de validación.
+        run: >-
+          npm exec --yes --package=netlify-cli@27.19.0 --
+          netlify deploy --build --prod --context production
+          --site "$NETLIFY_SITE_ID" --message "GitHub Actions $GITHUB_SHA"
+      - name: Verificar tienda y comunicación Astro-NestJS
+        run: node scripts/smoke-production.mjs

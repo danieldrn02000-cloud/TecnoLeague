@@ -2,6 +2,10 @@
 
 Requiere Node.js 22.12 o posterior, npm y PostgreSQL (local o Neon). Ejecuta los comandos desde la raíz del repositorio.
 
+El pipeline de GitHub Actions valida y prueba cada cambio y puede publicar en los
+servicios existentes de Render y Netlify. Consulta [la configuración de CI/CD](docs/CI_CD.md)
+para habilitar el despliegue de producción y registrar las variables y secretos.
+
 ```bash
 npm ci
 npm run setup
