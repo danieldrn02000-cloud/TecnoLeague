@@ -1,20 +1,28 @@
 name: TecnoLeague CI-CD
+#github busca automaticamente workflows, se tienen dos jobs
 
 on:
+  #al abrir o actualizar un pull request dirigido a main, valida los cambios
   pull_request:
     branches: [main]
+  
+  #al recibir un push en main, valida y puede desplegar
   push:
     branches: [main]
-  workflow_dispatch:
+  workflow_dispatch: #permite indicarlo manualmente desde github actions
 
+#PERMISOS Y EJECUCIONES SIMULTANEAS
+#El token automatico de GitHub tiene permiso de lecutra del repositorio. Los tokens de render y netlify se entregan por separado al job de publicación
 permissions:
-  contents: read
+  contents: read 
 
+#agrupa las ejecuciones por referencia de git
 concurrency:
   group: tecnoleague-${{ github.ref }}
   # Una publicación iniciada termina antes de comenzar la siguiente.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+#JOB VALIDATE, se ejecuta en ubuntu con tiemo de maximo 25 minutos
 jobs:
   validate:
     name: Validar, probar y construir
@@ -32,6 +40,9 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U tecnoleague -d tecnoleague_ci"
           --health-interval 5s --health-timeout 5s --health-retries 10
+    
+    #prueba de BD desechable
+    #se apunta al postgresql temporal del runner de github. Las migraciones y los datos de prepacion de ese job se publican ahi
     env:
       CI: "true"
       DATABASE_URL: postgresql://tecnoleague:ci-local-only@127.0.0.1:5432/tecnoleague_ci?schema=public
@@ -46,53 +57,79 @@ jobs:
       BACKEND_GRAPHQL_URL: http://127.0.0.1:4000/graphql
       ASTRO_TELEMETRY_DISABLED: "1"
       NETLIFY: "true"
+
+    #PASOS
     steps:
+      #obtención del codigo correspondiente a la ejecución
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+
+      #Instala node 22 y habilia la cache de nom    
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
+      
+      #instala las versiones del package-lock.json
       - name: Instalar dependencias reproducibles
         run: npm ci
+      
+      #Comprueba que el esquema prisma sea válido
       - name: Validar esquema y generar Prisma
         run: |
           npx prisma validate --schema back/prisma/schema.prisma
           npm run db:generate
+      
+      #Ejecuta Eslint sobre el codigo configurado
       - name: Analizar calidad con ESLint
         run: npm run lint
+
+      #aplica las migraciones a postgres temporal
       - name: Preparar PostgreSQL desechable
         run: |
           npm run db:migrate
           npm run db:seed
           mkdir -p reports
+
+      #Prepara el catalogo y adminstrador de CI
       - name: Construir backend
         run: npm run build -w back
+      
       - name: Pruebas de recuperación del checkout
         run: node --test scripts/test-checkout-recuperacion.cjs
+      
       - name: Pruebas de backend con PostgreSQL y proveedores simulados
         run: >-
           node --test --test-concurrency=1
           --test-reporter=spec --test-reporter-destination=stdout
           --test-reporter=junit --test-reporter-destination=reports/backend.xml
           back/test/*.test.cjs
+      
       - name: Pruebas del frontend
         run: npm run test -w front -- --reporter=default --reporter=junit --outputFile.junit=../reports/frontend.xml
+      
       - name: Integración real de WebSocket y BackOffice
         run: npm run test -w front -- --config vitest.backoffice.config.ts --reporter=default --reporter=junit --outputFile.junit=../reports/backoffice.xml
+      
       - name: Probar automatización del despliegue sin servicios reales
         run: node --test scripts/test-deploy-render.mjs
+      
       - name: Generar build de producción Astro y Netlify Functions
         run: npm run build -w front
+      
+      #Informes y artefactos
+      #se guardan informes JUnit durante 14 dias
       - name: Conservar informes
-        if: always()
+        if: always() #se puede ejecutar aunque una prueba anterior haya fallado, los archivos existentes ayudan a investigar el fallo
         uses: actions/upload-artifact@v4
         with:
           name: test-reports-${{ github.sha }}
           path: reports/
           if-no-files-found: ignore
           retention-days: 14
+      
+      #se guardan archivos del build por 7 dias
       - name: Conservar build validado
         uses: actions/upload-artifact@v4
         with:
@@ -104,14 +141,19 @@ jobs:
             front/.netlify/
           retention-days: 7
 
+  #JOB DEPLOY
   deploy:
     name: Publicar en producción
-    needs: validate
+    needs: validate #exige que validate se termine correctamente antes de publicar
+    
+    #Para desplegar la ejecución no debe proceder de un pull requett, se estrabajando sobre main y CD enabled sea verdadera
     if: >-
       github.event_name != 'pull_request' &&
       github.ref == 'refs/heads/main' && vars.CD_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    
+    #identifca la publicacion dentro de github. Permite asociar historial y secretos al entorno de producción
     environment:
       name: production
       url: ${{ vars.PRODUCTION_SITE_URL }}
@@ -121,26 +163,40 @@ jobs:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}
       PRODUCTION_SITE_URL: ${{ vars.PRODUCTION_SITE_URL }}
+    
+    #Orden de publicación:
     steps:
+      #obtienen nuevamente el codigo e instala dependencias porque utiliza otra maquina temporal
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
+    
       - name: Comprobar configuración antes de publicar
         run: node scripts/deploy-render.mjs --check
+    
       - name: Instalar dependencias del commit validado
         run: npm ci
+    
       - name: Desplegar el commit validado en Render y esperar a que esté activo
         run: node scripts/deploy-render.mjs
+    
       - name: Construir y publicar Netlify con su configuración de producción
-        # El CLI recupera las variables del sitio. Ningún secreto de la aplicación
-        # se incorpora a los artefactos públicos del job de validación.
+    
+        # El CLI recupera las variables del sitio. Ningún secreto de la aplicación se incorpora a los artefactos públicos del job de validación.
+        #filter selecciona el workspace del front, site selecciona el sitio de mi cuenta en netlify
         run: >-
-          npm exec --yes --package=netlify-cli@27.19.0 --
-          netlify deploy --build --prod --context production
-          --site "$NETLIFY_SITE_ID" --message "GitHub Actions $GITHUB_SHA"
+          npm exec --yes --package=netlify-cli@27.19.0 -- 
+          netlify deploy
+          --filter @tecnoleague/front
+          --build 
+          --prod 
+          --context production
+          --site "$NETLIFY_SITE_ID" 
+          --message "GitHub Actions $GITHUB_SHA"
       - name: Verificar tienda y comunicación Astro-NestJS
         run: node scripts/smoke-production.mjs

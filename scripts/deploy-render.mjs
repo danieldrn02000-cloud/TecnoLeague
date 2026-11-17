@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 
+//usa la API de render para publicar un commit concreto y esperar su resultado
 export function validateConfig(env) {
   for (const key of [
     "RENDER_API_KEY",
@@ -11,6 +12,7 @@ export function validateConfig(env) {
     if (!env[key]?.trim())
       throw new Error(`Falta configurar ${key} para producción.`);
   }
+
   const site = new URL(env.PRODUCTION_SITE_URL);
   if (
     site.protocol !== "https:" ||
@@ -38,12 +40,14 @@ export async function deployRender(
 ) {
   validateConfig(env);
   const base = `https://api.render.com/v1/services/${encodeURIComponent(env.RENDER_SERVICE_ID)}/deploys`;
+  
   const headers = {
     Authorization: `Bearer ${env.RENDER_API_KEY}`,
     "Content-Type": "application/json",
   };
   async function api(url, options = {}) {
     let response;
+  
     try {
       response = await request(url, {
         ...options,
@@ -54,6 +58,7 @@ export async function deployRender(
     } catch {
       throw new Error("No se pudo contactar a la API de Render.");
     }
+  
     // No imprimir respuestas completas: pueden contener configuración privada.
     if (!response.ok)
       throw new Error(
@@ -81,6 +86,7 @@ export async function deployRender(
     "canceled",
     "deactivated",
   ]);
+  
   const deadline = Date.now() + 20 * 60 * 1000;
   for (
     let attempt = 0;
