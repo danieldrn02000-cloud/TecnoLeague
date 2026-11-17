@@ -36,6 +36,14 @@ it("conserva el 404 del backend para un archivo que ya no existe", async () => {
   expect((await GET(contexto())).status).toBe(404);
 });
 
+it("sirve los formatos nuevos normalizados a WebP", async () => {
+  vi.stubEnv("BACKEND_GRAPHQL_URL", "https://backend.onrender.com/graphql");
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]))));
+  const response = await GET(contexto(archivo.replace(".png", ".webp")));
+  expect(response.status).toBe(200);
+  expect(response.headers.get("Content-Type")).toBe("image/webp");
+});
+
 it("rechaza rutas arbitrarias antes de consultar el backend", async () => {
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);

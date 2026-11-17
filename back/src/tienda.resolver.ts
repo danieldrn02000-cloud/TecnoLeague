@@ -30,6 +30,7 @@ import {
   RequestContext,
 } from "./types";
 import { GraphQLError } from "graphql";
+import { folioPedido } from "./pedido-folio";
 
 function exigirPuenteAuth(ctx: RequestContext) {
   const secreto = process.env.AUTH_BRIDGE_SECRET;
@@ -180,6 +181,8 @@ export class TiendaResolver {
 
 @Resolver("Producto")
 export class ProductoResolver {
+  // Campo legado para que las pestañas abiertas antes del despliegue sigan funcionando.
+  @ResolveField("stockMinimo") stockMinimo() { return 0; }
   constructor(private readonly db: PrismaService) {}
   @ResolveField("categoria") categoria(
     @Parent() p: Producto & { categoria?: Categoria },
@@ -231,7 +234,7 @@ export class PedidoResolver {
     return "PENDIENTE";
   }
   @ResolveField("folio") folio(@Parent() p: Pedido) {
-    return `TL-${p.fecha.getFullYear()}-${String(p.id).padStart(4, "0")}`;
+    return folioPedido(p);
   }
   @ResolveField("fecha") fecha(@Parent() p: Pedido) {
     return p.fecha.toISOString();

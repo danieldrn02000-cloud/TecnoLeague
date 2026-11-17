@@ -5,7 +5,7 @@ export const prerender = false;
 export const GET: APIRoute = async ({ params }) => {
   const archivo = params.archivo || "";
   if (
-    !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(jpg|png)$/.test(
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(jpg|png|webp)$/.test(
       archivo,
     )
   ) {
@@ -21,7 +21,7 @@ export const GET: APIRoute = async ({ params }) => {
       });
     return new Response(response.body, {
       headers: {
-        "Content-Type": archivo.endsWith(".png") ? "image/png" : "image/jpeg",
+        "Content-Type": archivo.endsWith(".png") ? "image/png" : archivo.endsWith(".webp") ? "image/webp" : "image/jpeg",
         "Cache-Control": "public, max-age=31536000, immutable",
         "X-Content-Type-Options": "nosniff",
       },

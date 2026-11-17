@@ -6,7 +6,8 @@ export interface ProductoInput {
   precio: number;
   imagen: string;
   stock: number;
-  stockMinimo: number;
+  /** @deprecated Compatibilidad con clientes anteriores; no se almacena. */
+  stockMinimo?: number;
   marca: string;
   especificaciones: string;
   categoriaId: number;

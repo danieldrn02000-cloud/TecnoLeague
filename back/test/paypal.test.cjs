@@ -117,6 +117,7 @@ test("PayPal Checkout sobre PostgreSQL", { skip: !process.env.PAYPAL_TEST_DATABA
     assert.equal(f.capturas, 1);
     const pedido = await db.pedido.findFirstOrThrow({ where: { usuarioId: f.usuario.id }, include: { detalles: true, pagos: true } });
     assert.equal(pedido.metodoPago, "PAYPAL"); assert.equal(pedido.detalles.length, 2); assert.equal(pedido.total.toFixed(2), "97.00");
+    assert.equal(await db.correoPedido.count({ where: { pedidoId: pedido.id } }), 1);
     assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.productos[0].id } })).stock, 18);
     assert.equal((await db.producto.findUniqueOrThrow({ where: { id: f.productos[1].id } })).stock, 17);
     assert.equal(await db.pedido.count({ where: { usuarioId: f.usuario.id } }), 1);

@@ -325,6 +325,7 @@ test("Orders y reservas sobre PostgreSQL real", {
     assert.equal(f.llamadas[0].total, "51.00");
     assert.equal(f.llamadas[0].modoCaptura, "automatic");
     assert.equal(await db.pedido.count({ where: { usuarioId: f.usuario.id } }), 1);
+    assert.equal(await db.correoPedido.count({ where: { pedido: { usuarioId: f.usuario.id } } }), 1);
     const op = await db.operacionCobro.findFirstOrThrow({ where: { intentoId: preparado.intentoId } });
     assert.equal(op.estado, "FINALIZADA");
     assert.equal(op.modoCaptura, "automatic");

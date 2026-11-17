@@ -23,7 +23,13 @@ import { AuthService } from "./auth.service";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const ARCHIVO =
-  /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(jpg|png)$/;
+  /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(jpg|png|webp)$/;
+const FORMATOS: Record<string, string> = {
+  "image/jpeg": "jpeg", "image/png": "png", "image/avif": "heif",
+  "image/webp": "webp", "image/gif": "gif", "image/tiff": "tiff",
+  "image/x-tiff": "tiff",
+};
+const MENSAJE_FORMATO = "Selecciona una imagen JPG, JPEG, PNG, AVIF, WebP, GIF o TIFF.";
 
 @Controller("imagenes")
 export class ImagenesController {
@@ -55,9 +61,9 @@ export class ImagenesController {
       throw error;
     }
     const tipo = request.headers["content-type"]?.split(";")[0];
-    if (tipo !== "image/jpeg" && tipo !== "image/png") {
+    if (!tipo || !FORMATOS[tipo]) {
       throw new UnsupportedMediaTypeException(
-        "Selecciona una imagen JPG, JPEG o PNG.",
+        MENSAJE_FORMATO,
       );
     }
     if (Number(request.headers["content-length"]) > MAX_BYTES) {
@@ -80,12 +86,13 @@ export class ImagenesController {
       const image = sharp(Buffer.concat(chunks), {
         limitInputPixels: 40_000_000,
         failOn: "warning",
+        page: 0,
+        pages: 1,
       });
       const metadata = await image.metadata();
       if (
-        (tipo === "image/png" && metadata.format !== "png") ||
-        (tipo === "image/jpeg" && metadata.format !== "jpeg") ||
-        (metadata.pages ?? 1) > 1
+        metadata.format !== FORMATOS[tipo] ||
+        (tipo === "image/avif" && metadata.compression !== "av1")
       ) {
         throw new Error("Formato incorrecto");
       }
@@ -94,18 +101,20 @@ export class ImagenesController {
         .rotate()
         .resize(2400, 2400, { fit: "inside", withoutEnlargement: true });
       contenido = await (
-        tipo === "image/png" ? resized.png() : resized.jpeg({ quality: 90 })
+        tipo === "image/png" ? resized.png()
+          : tipo === "image/jpeg" ? resized.jpeg({ quality: 90 })
+          : resized.webp({ quality: 85 })
       ).toBuffer();
     } catch {
       throw new BadRequestException(
-        "El archivo no es una imagen JPG, JPEG o PNG válida (máximo 40 megapíxeles).",
+        "El archivo no es una imagen válida de un formato admitido (máximo 40 megapíxeles).",
       );
     }
     if (contenido.length > MAX_BYTES)
       throw new PayloadTooLargeException(
         "La imagen procesada supera los 5 MB. Reduce sus dimensiones.",
       );
-    const archivo = `${randomUUID()}.${tipo === "image/png" ? "png" : "jpg"}`;
+    const archivo = `${randomUUID()}.${tipo === "image/png" ? "png" : tipo === "image/jpeg" ? "jpg" : "webp"}`;
     try {
       await mkdir(this.directorio(), { recursive: true });
       await writeFile(resolve(this.directorio(), archivo), contenido, {
@@ -131,7 +140,7 @@ export class ImagenesController {
       throw new NotFoundException("La imagen no existe.");
     }
     return new StreamableFile(contenido, {
-      type: archivo.endsWith(".png") ? "image/png" : "image/jpeg",
+      type: archivo.endsWith(".png") ? "image/png" : archivo.endsWith(".webp") ? "image/webp" : "image/jpeg",
       disposition: "inline",
       length: contenido.length,
     });

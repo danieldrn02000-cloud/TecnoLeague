@@ -62,7 +62,6 @@ model Producto {
   marca            String
   especificaciones String
   activo           Boolean                @default(true)
-  stockMinimo      Int                    @default(5) @map("stock_minimo")
   categoriaId      Int                    @map("categoria_id")
   categoria        Categoria              @relation(fields: [categoriaId], references: [id])
   detalles         DetallePedido[]
@@ -114,9 +113,27 @@ model Pedido {
   intento               IntentoCompra?
   cambiosEstado         EventoEstadoPedido[]
   movimientosInventario MovimientoInventario[]
+  correoConfirmacion    CorreoPedido?
 
   @@index([usuarioId, fecha])
   @@map("pedidos")
+}
+
+model CorreoPedido {
+  pedidoId         Int       @id @map("pedido_id")
+  pedido           Pedido    @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  creadoEn         DateTime  @default(now()) @map("creado_en")
+  enviadoEn        DateTime? @map("enviado_en")
+  intentos         Int       @default(0)
+  proximoIntento   DateTime  @default(now()) @map("proximo_intento")
+  primerIntentoEn  DateTime? @map("primer_intento_en")
+  bloqueadoHasta   DateTime? @map("bloqueado_hasta")
+  bloqueoId        String?   @map("bloqueo_id")
+  contenido        Json?
+  ultimoError      String?   @map("ultimo_error")
+
+  @@index([enviadoEn, proximoIntento])
+  @@map("correos_pedido")
 }
 
 model DetallePedido {

@@ -35,7 +35,7 @@ Para habilitar **Continuar con Google**, consulta [la configuración de Google I
 
 ## Añadir imágenes
 
-En **Administración → Productos → Nuevo producto / Editar producto**, pulsa **Añadir imagen** y selecciona un archivo `.jpg`, `.jpeg` o `.png` de hasta 5 MB. Espera a que termine la subida y guarda el producto. También puedes conservar una ruta `/images/archivo` o una URL HTTPS.
+En **Administración → Productos → Nuevo producto / Editar producto**, pulsa **Añadir imagen** y selecciona JPG/JPEG, PNG, AVIF, WebP, GIF o TIFF de hasta 5 MB. Espera a que termine la subida y guarda el producto. Los formatos nuevos se normalizan a WebP; GIF y TIFF usan el primer fotograma o página. También puedes conservar una ruta `/images/archivo` o una URL HTTPS.
 
 Solo una sesión ADMIN puede subir archivos. El backend comprueba el formato real, limita la imagen a 40 megapíxeles de entrada, la vuelve a codificar, elimina metadatos y guarda un nombre aleatorio. Las imágenes se sirven mediante Astro y son visibles desde ambos equipos.
 
@@ -46,8 +46,20 @@ Para Render + Netlify:
 1. En el servicio del **backend de Render**, monta un disco persistente en `/var/data` y configura `IMAGE_UPLOAD_DIR=/var/data/tecnoleague/imagenes`. El directorio por sí solo no crea el disco: necesitas un plan de Render que admita discos persistentes.
 2. Si ya hay imágenes en `back/uploads/`, cópialas al nuevo directorio conservando sus nombres antes de cambiar la variable. Cambiar el directorio no mueve los archivos existentes.
 3. En Netlify conserva `BACKEND_GRAPHQL_URL=https://TU_BACKEND.onrender.com/graphql`. Todas las subidas se reenvían a ese backend; no se guardan en el disco de Netlify ni en el navegador.
-4. Al guardar el producto se persiste la ruta `/images/uploads/UUID.png` o `.jpg` en `productos.imagen`. La ruta pública de Astro obtiene el archivo desde `GET /imagenes/:archivo` en NestJS sin exigir sesión, por lo que cualquier visitante puede verlo.
+4. Al guardar el producto se persiste la ruta `/images/uploads/UUID.png`, `.jpg` o `.webp` en `productos.imagen`. La ruta pública de Astro obtiene el archivo desde `GET /imagenes/:archivo` en NestJS sin exigir sesión, por lo que cualquier visitante puede verlo.
 5. Comprueba la URL de la imagen en una ventana privada y tras un nuevo despliegue del backend. Ambos deben mostrar el mismo archivo. La base de datos y el directorio de imágenes deben conservarse juntos.
+
+## Confirmación de pedidos e inventario
+
+Los pedidos nuevos encolan una confirmación por correo con folio, productos, total
+y dirección de entrega. Se utiliza Resend con `RESEND_API_KEY` y `ORDER_EMAIL_FROM`
+o el remitente existente `PASSWORD_RESET_FROM`. Si aún no hay guía, se indica
+**Por asignar**. Consulta [la configuración y los reintentos](docs/PEDIDOS_CORREO.md).
+
+La migración `202611170001_imagenes_inventario_correos` elimina el mínimo de
+existencias de productos y agrega la cola de correos. El inventario muestra
+disponibles y agotados; las existencias actuales se conservan. Aplica la migración
+antes de reiniciar el backend con esta versión.
 
 ## Categorías, productos y contadores de IDs
 

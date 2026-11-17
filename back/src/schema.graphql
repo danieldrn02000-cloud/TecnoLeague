@@ -30,7 +30,7 @@ type Producto {
   imagen: String!
   """Unidades disponibles."""
   stock: Int!
-  stockMinimo: Int!
+  stockMinimo: Int! @deprecated(reason: "El mínimo se eliminó; se devuelve 0 por compatibilidad.")
   """Marca del producto."""
   marca: String!
   """Características separadas por punto y coma."""
@@ -182,7 +182,7 @@ type DashboardAdmin {
   totalPedidos: Int!
   pedidosPendientes: Int!
   productosActivos: Int!
-  stockBajo: Int!
+  stockBajo: Int! @deprecated(reason: "El mínimo se eliminó. Consulta sinExistencias.")
   sinExistencias: Int!
   ventasPorDia: [VentaDia!]!
   pedidosRecientes: [Pedido!]!
@@ -222,7 +222,7 @@ input ProductoInput {
   imagen: String!
   """Existencias enteras no negativas."""
   stock: Int!
-  stockMinimo: Int = 5
+  stockMinimo: Int @deprecated(reason: "El mínimo se eliminó; este valor se ignora.")
   """Marca de hasta 80 caracteres."""
   marca: String!
   """Características separadas por punto y coma."""

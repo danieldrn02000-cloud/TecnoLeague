@@ -1420,6 +1420,7 @@ export class PagosService implements OnModuleInit, OnModuleDestroy {
               huellaSolicitud: intento.huellaSolicitud,
               total: intento.total,
               status: "PAGADO",
+              correoConfirmacion: { create: {} },
               metodoPago:
                 intento.modalidad === "PAYPAL" ? "PAYPAL" : "MERCADO_PAGO",
               detalles: {

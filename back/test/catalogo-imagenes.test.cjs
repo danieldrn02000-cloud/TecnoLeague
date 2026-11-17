@@ -104,6 +104,37 @@ test("imágenes: permisos, validación del contenido, almacenamiento y lectura H
           assert.equal((await fetch(`${base}/${file}`)).status, 200);
       },
     );
+    await t.test("acepta AVIF, WebP, GIF y TIFF y los publica como WebP", async () => {
+      for (const [format, type] of [["avif", "image/avif"], ["webp", "image/webp"], ["gif", "image/gif"], ["tiff", "image/tiff"]]) {
+        const buffer = await sharp(png).toFormat(format).toBuffer();
+        const response = await upload(buffer, type);
+        assert.equal(response.status, 201, `Subida de ${format}`);
+        const { imagen } = await response.json();
+        assert.match(imagen, /\.webp$/);
+        const get = await fetch(`${base}/${imagen.split("/").pop()}`);
+        assert.equal(get.status, 200);
+        assert.equal(get.headers.get("content-type"), "image/webp");
+        const metadata = await sharp(Buffer.from(await get.arrayBuffer())).metadata();
+        assert.equal(metadata.format, "webp");
+        assert.equal(metadata.width, 20);
+      }
+    });
+    await t.test("GIF animado se convierte a una sola imagen", async () => {
+      const raw = Buffer.from([
+        ...Array.from({ length: 4 }, () => [255, 0, 0, 255]).flat(),
+        ...Array.from({ length: 4 }, () => [0, 0, 255, 255]).flat(),
+      ]);
+      const gif = await sharp(raw, { raw: { width: 2, height: 4, pageHeight: 2, channels: 4 } }).gif({ delay: [100, 100] }).toBuffer();
+      assert.equal((await sharp(gif, { animated: true }).metadata()).pages, 2);
+      const response = await upload(gif, "image/gif");
+      assert.equal(response.status, 201);
+      const { imagen } = await response.json();
+      const get = await fetch(`${base}/${imagen.split("/").pop()}`);
+      const metadata = await sharp(Buffer.from(await get.arrayBuffer())).metadata();
+      assert.equal(metadata.format, "webp");
+      assert.equal(metadata.height, 2);
+      assert.equal(metadata.pages || 1, 1);
+    });
     await t.test(
       "rechaza archivos disfrazados, MIME incorrecto y más de 5 MB",
       async () => {

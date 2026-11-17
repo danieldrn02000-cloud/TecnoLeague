@@ -54,6 +54,7 @@ jobs:
       ADMIN_EMAIL: admin-ci@tecnoleague.test
       ADMIN_PASSWORD: Admin-ci-only-123456
       MP_RECONCILIATION_DISABLED: "1"
+      ORDER_EMAIL_DISABLED: "1"
       BACKEND_GRAPHQL_URL: http://127.0.0.1:4000/graphql
       ASTRO_TELEMETRY_DISABLED: "1"
       NETLIFY: "true"

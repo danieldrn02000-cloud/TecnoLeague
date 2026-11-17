@@ -26,7 +26,7 @@ const {usuarioActual}=await gql('{usuarioActual{id nombre email rol}}',{},auth);
 const correoOtro=`api-${randomUUID()}@example.test`;
 const {registrarUsuario:otraSesion}=await gql(registrar,{datos:{nombre:'Otra cuenta API',email:correoOtro,password}},{authBridge:true});
 const otraAuth={token:otraSesion.token};
-const datos={nombre:'PRUEBA API - artículo temporal',descripcion:'Artículo creado por la prueba automática.',precio:19.9,imagen:'/images/keyboard.jpg',stock:3,stockMinimo:5,marca:'TEST',especificaciones:'Solo pruebas',categoriaId:categorias[0].id};
+const datos={nombre:'PRUEBA API - artículo temporal',descripcion:'Artículo creado por la prueba automática.',precio:19.9,imagen:'/images/keyboard.jpg',stock:3,marca:'TEST',especificaciones:'Solo pruebas',categoriaId:categorias[0].id};
 const crear='mutation($datos:ProductoInput!){crearProducto(datos:$datos){id stock precio}}';
 await assert.rejects(()=>gql(crear,{datos}),/Inicia sesión/);
 await assert.rejects(()=>gql(crear,{datos},{token:auth.token}),/permiso/);
@@ -47,7 +47,7 @@ const resultados=await Promise.allSettled([gql(comprar,{datos:pedido(1)},auth),g
 await gql('mutation($id:Int!,$datos:ProductoInput!){actualizarProducto(id:$id,datos:$datos){id}}',{id,datos:{...datos,nombre:'PRUEBA API editada',precio:25.5,stock:0}},{admin:true});assert.equal((await leer()).precio,25.5);
 await assert.rejects(()=>gql('query{adminPedidos{total}}',{}, {token:auth.token}),/permiso/);
 const fechaDesde=new Date(Date.now()-30*86400000).toISOString();const fechaHasta=new Date().toISOString();
-const dashboard=await gql('query($desde:String!,$hasta:String!){adminDashboard(desde:$desde,hasta:$hasta){totalPedidos pedidosPendientes pedidosRecientes{id} ventasTotales stockBajo sinExistencias}}',{desde:fechaDesde,hasta:fechaHasta},{admin:true});assert.ok(dashboard.adminDashboard.totalPedidos>=2);assert.ok(dashboard.adminDashboard.pedidosPendientes>=2);assert.ok(dashboard.adminDashboard.pedidosRecientes.some(p=>p.id===primero.id),'El pedido nuevo debe aparecer en la actividad reciente del dashboard.');
+const dashboard=await gql('query($desde:String!,$hasta:String!){adminDashboard(desde:$desde,hasta:$hasta){totalPedidos pedidosPendientes pedidosRecientes{id} ventasTotales sinExistencias}}',{desde:fechaDesde,hasta:fechaHasta},{admin:true});assert.ok(dashboard.adminDashboard.totalPedidos>=2);assert.ok(dashboard.adminDashboard.pedidosPendientes>=2);assert.ok(dashboard.adminDashboard.pedidosRecientes.some(p=>p.id===primero.id),'El pedido nuevo debe aparecer en la actividad reciente del dashboard.');
 await assert.rejects(()=>gql('mutation($id:Int!,$estado:EstadoPedido!){actualizarEstadoPedido(id:$id,estado:$estado){id}}',{id:primero.id,estado:'PAGADO'},{admin:true}),/No se permite/);
 await gql('mutation($id:Int!,$estado:EstadoPedido!,$motivo:String){actualizarEstadoPedido(id:$id,estado:$estado,motivo:$motivo){id}}',{id:primero.id,estado:'CANCELADO',motivo:null},{admin:true});
 assert.equal((await leer()).stock,2,'Cancelar el primer pedido debe liberar sus unidades una sola vez.');

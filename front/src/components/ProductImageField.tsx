@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { ACEPTAR_IMAGENES, FORMATOS_IMAGEN, tipoImagen } from "../lib/formatos-imagen";
 
 export function ProductImageField({
   initialImage,
@@ -20,11 +21,8 @@ export function ProductImageField({
   async function subir(file: File | undefined) {
     if (!file || disabled || subiendo) return;
     setError("");
-    if (
-      !/\.(jpe?g|png)$/i.test(file.name) ||
-      !["image/jpeg", "image/png"].includes(file.type)
-    ) {
-      setError("Selecciona una imagen JPG, JPEG o PNG.");
+    if (!tipoImagen(file.name, file.type)) {
+      setError(`Selecciona una imagen ${FORMATOS_IMAGEN}.`);
       return;
     }
     if (!file.size || file.size > 5 * 1024 * 1024) {
@@ -88,7 +86,7 @@ export function ProductImageField({
         type="file"
         aria-label="Seleccionar imagen del producto"
         hidden
-        accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+        accept={ACEPTAR_IMAGENES}
         disabled={disabled || subiendo}
         onChange={(event) => {
           void subir(event.target.files?.[0]);
@@ -103,7 +101,7 @@ export function ProductImageField({
       >
         {subiendo ? "Subiendo imagen…" : "Añadir imagen"}
       </button>
-      <small>JPG, JPEG o PNG. Máximo 5 MB.</small>
+      <small>{FORMATOS_IMAGEN}. Máximo 5 MB. GIF y TIFF: primera imagen.</small>
       {error && (
         <p className="form-error" role="alert">
           {error}

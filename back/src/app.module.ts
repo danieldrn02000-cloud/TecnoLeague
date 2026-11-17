@@ -30,6 +30,7 @@ import type { RequestContext } from "./types";
 import { ImagenesController } from "./imagenes.controller";
 import { idDiagnostico, opcionesBackOfficeWs } from "./backoffice-diagnostics";
 import { Tracking17Service } from "./tracking17.service";
+import { CorreoPedidoService } from "./correo-pedido.service";
 
 import {
   AuthResolver,
@@ -121,6 +122,7 @@ import {
     MercadoPagoOrdersService,
     PayPalService,
     Tracking17Service,
+    CorreoPedidoService,
   ],
   controllers: [PagosController, ImagenesController],
 })

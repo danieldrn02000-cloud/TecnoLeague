@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { getSessionUser, mismoOrigen } from "../../../lib/server/graphql";
 import { backendResourceUrl } from "../../../lib/server/imagenes";
+import { FORMATOS_IMAGEN, tipoImagen } from "../../../lib/formatos-imagen";
 
 export const prerender = false;
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -59,18 +60,16 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   const file = form.get("imagen");
   if (!(file instanceof File) || !file.size)
     return reply("Selecciona una imagen.", 400);
-  if (
-    !/\.(jpe?g|png)$/i.test(file.name) ||
-    !["image/jpeg", "image/png"].includes(file.type)
-  ) {
-    return reply("Selecciona una imagen JPG, JPEG o PNG.", 415);
+  const tipo = tipoImagen(file.name, file.type);
+  if (!tipo) {
+    return reply(`Selecciona una imagen ${FORMATOS_IMAGEN}.`, 415);
   }
   if (file.size > MAX_BYTES)
     return reply("La imagen debe pesar como máximo 5 MB.", 413);
   try {
     const response = await fetch(backendResourceUrl("/imagenes"), {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": file.type },
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": tipo },
       body: await file.arrayBuffer(),
       signal: AbortSignal.timeout(30000),
     });

@@ -62,7 +62,6 @@ export class AdminService {
       pedidosRecientes,
       movimientosRecientes,
       ventas,
-      productosConStockBajo,
     ] = await this.db.$transaction([
       this.db.pedido.count({ where }),
       this.db.pedido.count({
@@ -103,12 +102,6 @@ export class AdminService {
             )
           GROUP BY 1 ORDER BY 1
         `,
-      this.db.$queryRaw<{ count: number }[]>`
-          SELECT COUNT(*)::int AS count
-          FROM "productos"
-          WHERE "activo" = true AND "stock" > 0
-            AND "stock" <= "stock_minimo"
-        `,
     ]);
     const dias = new Map<string, number>();
     const cursor = new Date(
@@ -139,7 +132,7 @@ export class AdminService {
       totalPedidos: pedidos,
       pedidosPendientes,
       productosActivos,
-      stockBajo: productosConStockBajo[0]?.count ?? 0,
+      stockBajo: 0, // Compatibilidad durante el despliegue del nuevo frontend.
       sinExistencias,
       ventasPorDia: [...dias.entries()].map(([fecha, total]) => ({
         fecha,

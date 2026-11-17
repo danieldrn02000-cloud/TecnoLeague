@@ -11,7 +11,7 @@ export class GraphQLError extends Error {
 
 let redirigiendoAlLogin = false;
 export const PRODUCTO =
-  "id nombre descripcion precio imagen stock stockMinimo marca especificaciones categoria { id nombre }";
+  "id nombre descripcion precio imagen stock marca especificaciones categoria { id nombre }";
 export const PEDIDO = `id folio fecha total status nombre email direccion metodoPago trackingNumber trackingCarrierName trackingStatus trackingDescription trackingUpdatedAt detalles { id cantidad nombreProducto precioUnitario subtotal producto { ${PRODUCTO} } }`;
 export async function graphql<T>(
   query: string,

@@ -148,7 +148,7 @@ describe("Añadir imagen", () => {
         files: [new File(["<svg/>"], "foto.svg", { type: "image/svg+xml" })],
       },
     });
-    expect(screen.getByRole("alert").textContent).toContain("JPG, JPEG o PNG");
+    expect(screen.getByRole("alert").textContent).toContain("JPG, JPEG, PNG, AVIF");
     fireEvent.change(input, {
       target: {
         files: [

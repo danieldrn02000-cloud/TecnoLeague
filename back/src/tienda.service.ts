@@ -118,12 +118,6 @@ export class TiendaService {
     )
       fallo("Stock inválido.");
     if (
-      !Number.isInteger(datos.stockMinimo) ||
-      datos.stockMinimo < 0 ||
-      datos.stockMinimo > 100000
-    )
-      fallo("El nivel mínimo de existencias debe estar entre 0 y 100000.");
-    if (
       !datos.marca.trim() ||
       datos.marca.length > 80 ||
       datos.especificaciones.length > 2000
@@ -131,7 +125,7 @@ export class TiendaService {
       fallo("Revisa la marca y las especificaciones.");
     if (
       !/^\/images\/[a-zA-Z0-9._-]+$/.test(datos.imagen) &&
-      !/^\/images\/uploads\/[a-f0-9-]{36}\.(jpg|png)$/.test(datos.imagen) &&
+      !/^\/images\/uploads\/[a-f0-9-]{36}\.(jpg|png|webp)$/.test(datos.imagen) &&
       !/^https:\/\//.test(datos.imagen)
     )
       fallo("La imagen debe ser /images/archivo o una URL HTTPS.");
@@ -144,7 +138,11 @@ export class TiendaService {
     )
       fallo("Selecciona una categoría válida.");
     return {
-      ...datos,
+      descripcion: datos.descripcion,
+      imagen: datos.imagen,
+      stock: datos.stock,
+      especificaciones: datos.especificaciones,
+      categoriaId: datos.categoriaId,
       nombre: datos.nombre.trim(),
       marca: datos.marca.trim(),
       precio: new Prisma.Decimal(datos.precio.toFixed(2)),
@@ -196,7 +194,6 @@ export class TiendaService {
         descripcion: validado.descripcion,
         precio: validado.precio,
         imagen: validado.imagen,
-        stockMinimo: validado.stockMinimo,
         marca: validado.marca,
         especificaciones: validado.especificaciones,
         categoriaId: validado.categoriaId,
@@ -320,6 +317,7 @@ export class TiendaService {
               huellaSolicitud,
               total,
               detalles: { create: detalles },
+              correoConfirmacion: { create: {} },
             },
             include: detallePedido,
           });

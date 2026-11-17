@@ -170,14 +170,13 @@ function DashboardAdmin({
   const [rango, setRango] = useState(rangoInicial);
   const desde = `${rango.desde}T00:00:00.000Z`;
   const hasta = `${rango.hasta}T23:59:59.999Z`;
-  const consulta = `query($desde:String!,$hasta:String!){adminDashboard(desde:$desde,hasta:$hasta){ventasTotales totalPedidos pedidosPendientes productosActivos stockBajo sinExistencias ventasPorDia{fecha total} pedidosRecientes{id folio fecha total status nombre email metodoPago} movimientosRecientes{id tipo cantidad motivo creadoEn producto{id nombre stock} usuario{id nombre}}}}`;
+  const consulta = `query($desde:String!,$hasta:String!){adminDashboard(desde:$desde,hasta:$hasta){ventasTotales totalPedidos pedidosPendientes productosActivos sinExistencias ventasPorDia{fecha total} pedidosRecientes{id folio fecha total status nombre email metodoPago} movimientosRecientes{id tipo cantidad motivo creadoEn producto{id nombre stock} usuario{id nombre}}}}`;
   const { data, loading, error, retry } = useQuery<{
     adminDashboard: {
       ventasTotales: number;
       totalPedidos: number;
       pedidosPendientes: number;
       productosActivos: number;
-      stockBajo: number;
       sinExistencias: number;
       ventasPorDia: { fecha: string; total: number }[];
       pedidosRecientes: {
@@ -292,8 +291,8 @@ function DashboardAdmin({
               valor={String(dashboard.productosActivos)}
             />
             <Kpi
-              titulo="Stock bajo / agotado"
-              valor={`${dashboard.stockBajo} / ${dashboard.sinExistencias}`}
+              titulo="Sin existencias"
+              valor={String(dashboard.sinExistencias)}
             />
           </div>
           <div className="admin-dashboard-grid">
@@ -981,7 +980,7 @@ function DetallePedidoAdmin({
 function ExistenciasAdmin({ avisar }: { avisar: (s: string) => void }) {
   const [buscar, setBuscar] = useState("");
   const [productoId, setProductoId] = useState<number | null>(null);
-  const consulta = `query{productos(limite:100){total items{id nombre marca stock stockMinimo categoria{id nombre}}} adminMovimientos(limite:20){total items{id tipo cantidad motivo creadoEn producto{id nombre stock} usuario{id nombre}}}}`;
+  const consulta = `query{productos(limite:100){total items{id nombre marca stock categoria{id nombre}}} adminMovimientos(limite:20){total items{id tipo cantidad motivo creadoEn producto{id nombre stock} usuario{id nombre}}}}`;
   const { data, loading, error, retry } = useQuery<{
     productos: {
       total: number;
@@ -990,7 +989,6 @@ function ExistenciasAdmin({ avisar }: { avisar: (s: string) => void }) {
         nombre: string;
         marca: string;
         stock: number;
-        stockMinimo: number;
         categoria: Categoria;
       }[];
     };
@@ -1042,7 +1040,6 @@ function ExistenciasAdmin({ avisar }: { avisar: (s: string) => void }) {
                   <th>Producto</th>
                   <th>Categoría</th>
                   <th>Existencias</th>
-                  <th>Mínimo</th>
                   <th>Estado</th>
                   <th></th>
                 </tr>
@@ -1056,15 +1053,12 @@ function ExistenciasAdmin({ avisar }: { avisar: (s: string) => void }) {
                     </td>
                     <td>{p.categoria.nombre}</td>
                     <td>{p.stock}</td>
-                    <td>{p.stockMinimo}</td>
                     <td>
                       <Estado
                         etiqueta={
                           p.stock === 0
                             ? "AGOTADO"
-                            : p.stock <= p.stockMinimo
-                              ? "STOCK_BAJO"
-                              : "DISPONIBLE"
+                            : "DISPONIBLE"
                         }
                       />
                     </td>
@@ -1942,7 +1936,6 @@ function Editor({
       descripcion: String(f.get("descripcion")),
       precio: Number(f.get("precio")),
       stock: Number(f.get("stock")),
-      stockMinimo: Number(f.get("stockMinimo")),
       categoriaId: Number(f.get("categoriaId")),
       imagen: String(f.get("imagen")),
       especificaciones: String(f.get("especificaciones")),
@@ -2033,18 +2026,6 @@ function Editor({
                   Inventario.
                 </small>
               )}
-            </label>
-            <label>
-              Nivel mínimo de existencias
-              <input
-                name="stockMinimo"
-                type="number"
-                min="0"
-                max="100000"
-                step="1"
-                required
-                defaultValue={p?.stockMinimo ?? 5}
-              />
             </label>
             <label>
               Categoría
