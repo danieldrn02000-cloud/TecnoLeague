@@ -49,8 +49,14 @@ Si el build, la migración o el arranque falla, Netlify no se publica.
 
 ### Netlify: sitio existente del frontend
 
-- El archivo `netlify.toml` establece base `front`, comando `npm run build` y
-  publicación `dist`.
+- El archivo `netlify.toml` establece base `.` (raíz del repositorio), comando
+  `npm run build -w front` y publicación `front/dist`. Mantén el filtro
+  `--filter @tecnoleague/front` del CLI: selecciona el workspace y permite encontrar
+  las Functions generadas por Astro en `front/.netlify/v1/functions`.
+- No combines `base = "front"` con ese filtro: Netlify CLI 27.19.0 agrega el
+  workspace a la base al localizar las Functions y buscaría en
+  `front/front/.netlify/v1/functions`. En ese caso podría publicar los assets
+  estáticos y devolver 404 en `/` y `/api/graphql`, que necesitan la Function SSR.
 - `ignore = "exit 0"` omite los builds disparados automáticamente por Git. Actions
   ejecuta el build local mediante Netlify CLI y lo publica cuando CI y Render
   terminan correctamente. No pulses **Stop builds**, porque detendría mecanismos

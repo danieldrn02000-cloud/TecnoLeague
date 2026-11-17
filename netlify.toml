@@ -1,7 +1,9 @@
 [build]
-  base = "front" 
-  command = "npm run build"
-  publish = "dist"
+  # El CLI añade el workspace "front" al buscar las Functions del framework.
+  # La base debe ser la raíz para evitar buscar en front/front/.netlify/v1.
+  base = "."
+  command = "npm run build -w front"
+  publish = "front/dist"
   # Los builds automáticos por Git se omiten: Actions publica con Netlify CLI
   # después de aprobar CI. No detener todos los builds desde el panel de Netlify.
   ignore = "exit 0"
