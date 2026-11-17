@@ -6,6 +6,7 @@ export const prerender = false;
 const COOKIE = "tl_google_nonce";
 const query = `mutation Google($datos:GoogleInput!){iniciarSesionGoogle(datos:$datos){token usuario{id nombre email rol}}}`;
 
+//PREPARACION Y AUTENTICACION 
 export const POST: APIRoute = async ({ request, cookies }) => {
   if (!mismoOrigen(request))
     return Response.json({ error: "Solicitud no permitida." }, { status: 403 });
@@ -13,6 +14,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     const body = await request.json();
     if (body?.accion === "preparar") {
       const nonce = randomBytes(32).toString("base64url");
+      
       cookies.set(COOKIE, nonce, {
         httpOnly: true,
         secure: new URL(request.url).protocol === "https:",
@@ -25,6 +27,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         { headers: { "Cache-Control": "no-store" } },
       );
     }
+    
     const nonce = cookies.get(COOKIE)?.value;
     if (
       !nonce ||
@@ -49,6 +52,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       },
       "iniciarSesionGoogle",
     );
+    
     const result = await response.clone().json();
     if (result.code !== "GOOGLE_LINK_REQUIRED")
       cookies.delete(COOKIE, { path: "/api/auth/google" });

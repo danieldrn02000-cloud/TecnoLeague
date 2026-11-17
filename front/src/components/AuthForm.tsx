@@ -219,7 +219,9 @@ export function AuthForm({
             <ArrowRight size={17} />
           </button>
         </form>
+
         <GoogleSignIn next={next} disabled={busy} onBusy={setBusy} />
+        
         <p className="auth-switch">
           {registro ? "¿Ya tienes una cuenta?" : "¿Todavía no tienes cuenta?"}{" "}
           <a
