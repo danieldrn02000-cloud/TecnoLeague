@@ -37,8 +37,8 @@ export function contenidoPedido(pedido: PedidoCorreo, from: string): Mensaje {
     timeStyle: "short",
     timeZone: "America/Mexico_City",
   }).format(pedido.fecha);
-  const guia = pedido.trackingNumber || "Por asignar";
-  const paqueteria = pedido.trackingCarrierName || "Por asignar";
+  const guia = pedido.trackingNumber ||folioPedido(pedido) ;
+  const paqueteria = pedido.trackingCarrierName || "PaqueteExpress";
   const pago =
     pedido.metodoPago === "PAGO_AL_RECIBIR"
       ? "Pago al recibir"
