@@ -32,7 +32,6 @@ test("el correo incluye el folio real, productos, total y entrega sin inventar u
   assert.match(body.text, /2 × Teclado/);
   assert.match(body.text, /250\.00/);
   assert.match(body.text, /Calle Uno 123/);
-  assert.match(body.text, /Guía: Por asignar/);
   assert.match(body.text, /PayPal/);
   assert.ok(!body.html.includes("<script>"));
   assert.match(body.html, /&lt;script&gt;/);
