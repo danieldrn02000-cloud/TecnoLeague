@@ -194,6 +194,9 @@ useEffect(() => {
             >
               Pedidos
             </button>
+            <a className="gamer-guide-nav" href="/guia-gamer">
+              ¿Eres nuevo en el mundo gamer?
+            </a>
           </nav>
           <form
             className="search"
