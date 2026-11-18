@@ -1,109 +1,90 @@
-# TecnoLeague: desarrollo local y en la red
+# TecnoLeague
 
-Requiere Node.js 22.12 o posterior, npm y PostgreSQL (local o Neon). Ejecuta los comandos desde la raíz del repositorio.
+TecnoLeague es una tienda web de productos de tecnología y accesorios gamer. El
+proyecto integra catálogo, carrito, cuentas de usuario, pagos, pedidos, inventario
+y un panel administrativo dentro de una misma aplicación.
 
-El pipeline de GitHub Actions valida y prueba cada cambio y puede publicar en los
-servicios existentes de Render y Netlify. Consulta [la configuración de CI/CD](docs/CI_CD.md)
-para habilitar el despliegue de producción y registrar las variables y secretos.
+Su objetivo es cubrir el recorrido de una compra: consultar productos, preparar
+el carrito, autenticar al cliente, verificar el pago en el servidor, registrar el
+pedido, enviar una confirmación por correo y consultar los datos de entrega.
 
-```bash
-npm ci
-npm run setup
-```
+Los importes se manejan en pesos mexicanos (MXN). El catálogo de preparación
+incluye datos y fotografías de demostración; para una tienda comercial se deben
+revisar los productos, precios y derechos de uso de las imágenes.
 
-Configura `back/.env` con tu `DATABASE_URL`, `JWT_SECRET` y `AUTH_BRIDGE_SECRET`. En `front/.env`, configura `BACKEND_GRAPHQL_URL=http://127.0.0.1:4000/graphql` y el mismo `AUTH_BRIDGE_SECRET`. La URL de Neon pertenece exclusivamente a `back/.env`; nunca debe llevar prefijos `PUBLIC_` ni llegar al navegador.
+## Funcionalidades
 
-```bash
-npm run db:generate
-npm run db:migrate
-# Solo para preparar un catálogo de desarrollo y la cuenta ADMIN_EMAIL/ADMIN_PASSWORD:
-npm run db:seed
-npm run dev
-```
+### Clientes
 
-## Usar otra computadora de la misma red
+- Consultar productos y categorías, buscar y revisar sus características.
+- Agregar uno o varios artículos al carrito y modificar cantidades.
+- Registrarse e iniciar sesión con correo y contraseña.
+- Continuar con Google cuando la integración está configurada.
+- Recuperar la contraseña mediante un código de seis dígitos enviado por correo.
+- Pagar con tarjeta mediante Mercado Pago dentro de la tienda.
+- Pagar mediante PayPal con redirección para autorizar la compra.
+- Consultar pedidos, su folio y los datos de seguimiento disponibles.
+- Recibir un correo de confirmación por cada pedido nuevo.
 
-Ejecuta ambos servicios en la laptop. En la laptop puedes entrar por `http://localhost:5173`; en la otra computadora, escribe `http://IP_DE_TU_LAPTOP:5173`. Consulta la IPv4 de la laptop con `ipconfig` en Windows o `ip addr` en Linux. Ambos equipos deben estar en la misma red, sin aislamiento entre clientes, y el firewall de la laptop debe permitir TCP 5173 en la red privada.
+### Administración
 
-Astro escucha en todas las interfaces. Las consultas, las imágenes y las actualizaciones WebSocket pasan por el puerto 5173. Deja `PUBLIC_BACKOFFICE_WS_URL` vacía o sin definir en `front/.env` durante el desarrollo: así cada navegador usa el mismo origen desde el que abrió la tienda. No pongas `localhost`, la dirección de Neon ni la IP de la segunda computadora en esa variable.
+- Administrar productos y categorías.
+- Subir imágenes JPG/JPEG, PNG, AVIF, WebP, GIF y TIFF.
+- Consultar existencias y registrar movimientos de inventario.
+- Consultar ventas, pedidos y actividad reciente.
+- Actualizar estados de pedidos conforme a las reglas del backend.
+- Registrar una guía de envío y consultar su información mediante 17TRACK.
+- Recibir eventos en vivo para actualizar las vistas del BackOffice.
 
-`BACKEND_GRAPHQL_URL` sigue apuntando a NestJS desde la laptop, normalmente `http://127.0.0.1:4000/graphql`. Reinicia `npm run dev` tras cambiar los archivos `.env`. Cada dirección tiene sus propias cookies: inicia sesión en la dirección que estés utilizando.
+## Tecnologías utilizadas
 
-En Netlify, configura `BACKEND_GRAPHQL_URL=https://TU_BACKEND.onrender.com/graphql` para el build y las Functions y vuelve a desplegar. Las actualizaciones en vivo usan automáticamente `wss://TU_BACKEND.onrender.com/graphql`: no necesitas `PUBLIC_BACKOFFICE_WS_URL`. Esa variable es opcional si tu WebSocket usa otra dirección pública. El navegador conecta directamente a NestJS con un ticket temporal; Netlify no hospeda ni reenvía el WebSocket. Render debe admitir conexiones persistentes. Los valores `localhost` de los ejemplos y del proxy son para desarrollo; en producción ya no se usa una dirección local implícita si falta `BACKEND_GRAPHQL_URL`.
+| Área | Tecnologías y función |
+| --- | --- |
+| Lenguaje | TypeScript para frontend y backend; JavaScript para scripts auxiliares. |
+| Frontend | Astro 7 para páginas y rutas de servidor; React 19 para la interfaz interactiva. |
+| Estilos | Tailwind CSS 4, CSS del proyecto e iconos Lucide. |
+| Construcción del frontend | Vite y el adaptador `@astrojs/netlify`. |
+| Backend | Node.js 22.12 o posterior, NestJS 12 y Express. |
+| API propia | GraphQL, Apollo Server y resolvers de NestJS. |
+| Actualizaciones en vivo | WebSocket, `graphql-ws` y `graphql-subscriptions`. |
+| Persistencia | PostgreSQL y Prisma ORM 6, con migraciones versionadas. |
+| Autenticación | JWT propios, cookies `HttpOnly`, hashes de contraseña con `scrypt` y Google Identity Services. |
+| Imágenes | Sharp para comprobar, redimensionar y volver a codificar archivos. |
+| Correo | API de Resend para recuperación de contraseña y confirmaciones de pedido. |
+| Pruebas | Node Test Runner, Vitest y React Testing Library. |
+| Calidad | ESLint, comprobación de tipos y `astro check`. |
+| Automatización | GitHub Actions para CI/CD. |
+| Alojamiento | Netlify para Astro y sus Functions; Render para NestJS; PostgreSQL local o un proveedor como Neon. |
 
-Para habilitar **Continuar con Google**, consulta [la configuración de Google Identity](docs/GOOGLE_IDENTITY.md). La integración es opcional y conserva el acceso por contraseña y los pedidos existentes.
+### Integraciones externas
 
-## Añadir imágenes
+| Servicio | Uso dentro de TecnoLeague |
+| --- | --- |
+| Mercado Pago | Tokenizar tarjetas, procesar órdenes y verificar resultados de pago. |
+| PayPal | Crear órdenes, obtener autorización y capturar pagos. |
+| Google Identity Services | Autenticar una cuenta de Google para iniciar una sesión propia de la tienda. |
+| Resend | Enviar los correos de recuperación y de confirmación de pedidos. |
+| 17TRACK | Registrar números de guía existentes y consultar información de rastreo. |
 
-En **Administración → Productos → Nuevo producto / Editar producto**, pulsa **Añadir imagen** y selecciona JPG/JPEG, PNG, AVIF, WebP, GIF o TIFF de hasta 5 MB. Espera a que termine la subida y guarda el producto. Los formatos nuevos se normalizan a WebP; GIF y TIFF usan el primer fotograma o página. También puedes conservar una ruta `/images/archivo` o una URL HTTPS.
+## Arquitectura
 
-Solo una sesión ADMIN puede subir archivos. El backend comprueba el formato real, limita la imagen a 40 megapíxeles de entrada, la vuelve a codificar, elimina metadatos y guarda un nombre aleatorio. Las imágenes se sirven mediante Astro y son visibles desde ambos equipos.
+El repositorio utiliza npm workspaces para organizar dos aplicaciones:
 
-Por defecto se guardan en `back/uploads/`, que Git ignora. No borres esa carpeta y respáldala junto con la base de datos. Puedes definir `IMAGE_UPLOAD_DIR` en el backend para utilizar otro directorio persistente. En Render u otro alojamiento con disco efímero debes montar almacenamiento persistente y configurar esa variable; Neon guarda las rutas, no los archivos. Varias instancias del backend necesitan compartir el almacenamiento. Una imagen subida cuyo formulario se cancela puede quedar sin asociar a un producto.
+- `front`: frontend Astro y React, junto con las rutas de servidor de Astro.
+- `back`: API NestJS, reglas de negocio, integración con proveedores y acceso a datos.
 
-Para Render + Netlify:
+Astro funciona como intermediario entre el navegador y NestJS para las consultas
+HTTP y la autenticación. Este patrón permite mantener el token de sesión en una
+cookie protegida y agregar las credenciales necesarias desde el servidor web.
 
-1. En el servicio del **backend de Render**, monta un disco persistente en `/var/data` y configura `IMAGE_UPLOAD_DIR=/var/data/tecnoleague/imagenes`. El directorio por sí solo no crea el disco: necesitas un plan de Render que admita discos persistentes.
-2. Si ya hay imágenes en `back/uploads/`, cópialas al nuevo directorio conservando sus nombres antes de cambiar la variable. Cambiar el directorio no mueve los archivos existentes.
-3. En Netlify conserva `BACKEND_GRAPHQL_URL=https://TU_BACKEND.onrender.com/graphql`. Todas las subidas se reenvían a ese backend; no se guardan en el disco de Netlify ni en el navegador.
-4. Al guardar el producto se persiste la ruta `/images/uploads/UUID.png`, `.jpg` o `.webp` en `productos.imagen`. La ruta pública de Astro obtiene el archivo desde `GET /imagenes/:archivo` en NestJS sin exigir sesión, por lo que cualquier visitante puede verlo.
-5. Comprueba la URL de la imagen en una ventana privada y tras un nuevo despliegue del backend. Ambos deben mostrar el mismo archivo. La base de datos y el directorio de imágenes deben conservarse juntos.
-
-## Confirmación de pedidos e inventario
-
-Los pedidos nuevos encolan una confirmación por correo con folio, productos, total
-y dirección de entrega. Se utiliza Resend con `RESEND_API_KEY` y `ORDER_EMAIL_FROM`
-o el remitente existente `PASSWORD_RESET_FROM`. Si aún no hay guía, se indica
-**Por asignar**. Consulta [la configuración y los reintentos](docs/PEDIDOS_CORREO.md).
-
-La migración `202611170001_imagenes_inventario_correos` elimina el mínimo de
-existencias de productos y agrega la cola de correos. El inventario muestra
-disponibles y agotados; las existencias actuales se conservan. Aplica la migración
-antes de reiniciar el backend con esta versión.
-
-## Categorías, productos y contadores de IDs
-
-Un `P2002` de PostgreSQL puede indicar un ID repetido, aunque el nombre sea nuevo. Esto ocurre al importar filas con IDs explícitos sin adelantar sus secuencias. Ahora se distingue el nombre duplicado del contador desincronizado y de los errores de conexión o estructura.
-
-La migración `202610220001_reparar_secuencias` corrige los contadores existentes. Si importas más datos después, vuelve a sincronizarlos:
-
-```bash
-npm run db:repair-sequences
-```
-
-La reparación no borra registros, no cambia IDs y nunca retrocede los contadores. Requiere que las migraciones estén aplicadas y que el usuario de PostgreSQL tenga permisos sobre las tablas y secuencias. Puede bloquear brevemente escrituras mientras sincroniza. El seed también utiliza esta reparación.
-
-Para Neon, usa su cadena PostgreSQL con TLS (`sslmode=require`). Antes de migrar una base compartida, revisa el destino y conserva un respaldo; para las migraciones utiliza la conexión directa indicada por Neon si la conexión agrupada no permite la operación. Si Prisma informa que una base existente necesita establecer una línea base de migraciones, revisa ese estado antes de continuar: no ejecutes `migrate reset` sobre tus datos.
-
-## Actualizaciones en vivo
-
-Neon es el servidor de base de datos. El navegador se conecta por WebSocket a **NestJS**, que publica los eventos. Un fallo de Neon puede impedir validar el usuario o emitir el ticket; un WebSocket dirigido a `127.0.0.1` desde la segunda computadora falla incluso si Neon funciona.
-
-El panel muestra errores de configuración, sesión y conexión y permite **Reconectar**. Si persiste el error, revisa la petición `POST /api/admin/subscription-ticket`, el WebSocket `/api/backoffice-ws` en desarrollo y los logs del backend. La conexión administrativa utiliza un ticket breve; el JWT de sesión permanece en una cookie HttpOnly.
-
-Cada intento obtiene un ticket **antes de abrir el WebSocket**, también al reconectar. Así una consulta lenta a PostgreSQL, el arranque de Neon o la compilación inicial de Astro no consume el plazo de autenticación del socket. NestJS espera explícitamente 10 segundos para el mensaje inicial y el cliente espera 10 segundos para su confirmación. Los fallos temporales de red o del ticket se reintentan hasta cinco veces con espera progresiva; las sesiones inválidas y los permisos insuficientes se detienen.
-
-Los logs `[BackOffice]` del navegador y de Astro y el logger `BackOffice` de NestJS comparten un identificador `requestId`, que también aparece junto al error del panel. Registra las etapas del ticket, su estado HTTP y duración, los códigos de cierre WebSocket y los errores de validación. No se imprimen JWT, tickets, cookies ni cadenas de conexión. Un rechazo de origen se distingue de una cuenta sin permisos; los fallos de PostgreSQL se distinguen de una sesión inválida.
-
-Ejemplos de diagnóstico: `4408` significa que NestJS no recibió a tiempo la autenticación inicial; `4504`, que el cliente no recibió confirmación; `1006`, una interrupción sin cierre normal. `DATABASE_UNAVAILABLE` indica que el backend no pudo consultar al usuario; `BACKEND_UNREACHABLE`, que Astro no pudo contactar a NestJS. Comparte el identificador y el código, sin copiar el contenido del ticket.
-
-Los eventos se mantienen en memoria en una sola instancia NestJS. Si despliegas varias instancias, necesitas un canal de eventos compartido antes de garantizar notificaciones entre ellas.
-
-## Verificación
-
-```bash
-npm run lint
-npm run build
-npm run test:front
-npm run test:checkout
-# Sobre una base de desarrollo migrada y con seed; modifica datos de prueba:
-npm run test:subscriptions
-# Recorrido del hook React → ticket Astro → proxy → NestJS → PostgreSQL local:
-npm run test:backoffice
-```
-
-Las pruebas nuevas de imágenes ejercitan HTTP, JWT, permisos, decodificación, disco y reinicio del servidor; simulan la consulta del usuario a la base de datos. Las pruebas del frontend simulan el transporte y comprueban la selección de archivos, errores, agrupación de eventos, reconexión y limpieza. La prueba existente del BackOffice usa PostgreSQL real y Mercado Pago simulado.
-
-`test:backoffice` requiere PostgreSQL **local**, migraciones aplicadas y una cuenta administradora preparada por el seed. Abre servicios de prueba en puertos libres, usa el handler real de Astro, WebSocket real, los guards y resolvers de NestJS y Prisma real. Comprueba un ticket más lento que el plazo de inicio del socket, entrega de eventos, reconexión con otro ticket, cierre al abandonar el panel y rechazo sin sesión o sin rol ADMIN. También comprueba que un fallo simulado de Prisma devuelva un diagnóstico sin filtrar credenciales. `@types/jsdom` se utiliza únicamente para los tipos del navegador simulado en esa prueba.
-
-Para una comprobación manual, abre el administrador en ambos equipos. Crea una categoría con nombre nuevo y un producto con una imagen subida en uno; comprueba que el otro recibe el evento y muestra la imagen sin recargar. Interrumpe y recupera el backend y verifica la reconexión y la conservación de formularios en edición.
+```mermaid
+flowchart LR
+  Cliente[Cliente o administrador] --> Front[Astro + React en Netlify]
+  Front --> Rutas[Rutas Astro: /api/auth y /api/graphql]
+  Rutas --> Nest[NestJS + GraphQL en Render]
+  Nest --> Prisma[Prisma ORM]
+  Prisma --> DB[(PostgreSQL)]
+  Nest --> MP[Mercado Pago]
+  Nest --> PP[PayPal]
+  Nest --> Google[Verificación de identidad Google]
+  Nest --> Tracking[17TRACK]

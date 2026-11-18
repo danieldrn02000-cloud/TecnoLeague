@@ -101,7 +101,7 @@ export function ProductImageField({
       >
         {subiendo ? "Subiendo imagen…" : "Añadir imagen"}
       </button>
-      <small>{FORMATOS_IMAGEN}. Máximo 5 MB. GIF y TIFF: primera imagen.</small>
+      <small>{FORMATOS_IMAGEN}. Máximo 5 MB.</small>
       {error && (
         <p className="form-error" role="alert">
           {error}
