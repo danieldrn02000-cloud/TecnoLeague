@@ -81,7 +81,6 @@ export function contenidoPedido(pedido: PedidoCorreo, from: string): Mensaje {
       `Entrega a: ${pedido.nombre}`,
       `Dirección: ${pedido.direccion}`,
       `Paquetería: ${paqueteria}`,
-      `Guía: ${guia}`,
       seguimiento,
       ...(sitio ? [sitio] : []),
     ].join("\n"),
