@@ -8,7 +8,7 @@ import {
   ResolveField,
   Resolver,
 } from "@nestjs/graphql";
-import { EstadoPago, EstadoPedido, TipoMovimientoInventario } from "@prisma/client";
+import { EstadoPago, EstadoPedido, Rol, TipoMovimientoInventario } from "@prisma/client";
 import { GraphQLError } from "graphql";
 import { AuthGuard } from "./auth.guard";
 import { RolesGuard } from "./roles.guard";
@@ -88,8 +88,14 @@ export class AdminResolver {
     @Args("buscar") buscar: string,
     @Args("desde") desde: number,
     @Args("limite") limite: number,
+    @Args("incluirAdministradores") incluirAdministradores: boolean,
   ) {
-    return this.admin.clientes(buscar, desde, limite);
+    return this.admin.clientes(buscar, desde, limite, incluirAdministradores);
+  }
+
+  @Mutation("cambiarRolUsuario")
+  cambiarRolUsuario(@Args("id") id: number, @Args("rol") rol: Rol, @Context() ctx: RequestContext) {
+    return this.admin.cambiarRolUsuario(id, rol, actorId(ctx));
   }
 
   @Query("adminCliente")

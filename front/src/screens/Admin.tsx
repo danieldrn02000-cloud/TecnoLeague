@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import {
   Archive,
   Boxes,
+  BookOpen,
   CreditCard,
   LayoutDashboard,
   LogOut,
@@ -20,6 +21,7 @@ import {
 } from "../hooks/useBackOfficeEvents";
 import { Cargando, ErrorCarga, Imagen, Modal } from "../components/ui";
 import { ProductImageField } from "../components/ProductImageField";
+import { EditarGuiaGamer } from "./EditarGuiaGamer";
 import type { Categoria, PaginaProductos, Producto } from "../types";
 const CONSULTA = `query Inventario{productos(limite:100){total items{${PRODUCTO}}} categorias{id nombre}}`;
 type SeccionAdmin =
@@ -29,7 +31,8 @@ type SeccionAdmin =
   | "inventario"
   | "clientes"
   | "pagos"
-  | "categorias";
+  | "categorias"
+  | "guia";
 const SECCIONES: {
   id: SeccionAdmin;
   nombre: string;
@@ -42,6 +45,7 @@ const SECCIONES: {
   { id: "clientes", nombre: "Clientes", Icono: Users },
   { id: "pagos", nombre: "Pagos", Icono: CreditCard },
   { id: "categorias", nombre: "Categorías", Icono: Tags },
+  { id: "guia", nombre: "Guía gamer", Icono: BookOpen },
 ];
 export function Admin({ avisar }: { avisar: (s: string) => void }) {
   const { data, loading, error, retry } = useQuery<{
@@ -74,8 +78,8 @@ function PanelAdmin({ avisar }: { avisar: (s: string) => void }) {
   const [seccion, setSeccion] = useState<SeccionAdmin>("dashboard");
   const { estado: estadoConexion, detalle: detalleConexion, reintentar: reconectar } = useBackOfficeEvents(avisar);
   const { data } = useQuery<{
-    usuarioActual: { nombre: string; email: string };
-  }>("query AdminIdentidad{usuarioActual{nombre email}}");
+    usuarioActual: { id: number; nombre: string; email: string };
+  }>("query AdminIdentidad{usuarioActual{id nombre email}}");
   const titulo = SECCIONES.find((item) => item.id === seccion)?.nombre;
   return (
     <div className="admin-shell">
@@ -140,9 +144,10 @@ function PanelAdmin({ avisar }: { avisar: (s: string) => void }) {
         {seccion === "productos" && <Inventario avisar={avisar} />}
         {seccion === "pedidos" && <PedidosAdmin avisar={avisar} />}
         {seccion === "inventario" && <ExistenciasAdmin avisar={avisar} />}
-        {seccion === "clientes" && <ClientesAdmin />}
+        {seccion === "clientes" && <ClientesAdmin actorId={data?.usuarioActual.id} avisar={avisar} />}
         {seccion === "pagos" && <PagosAdmin />}
         {seccion === "categorias" && <CategoriasAdmin avisar={avisar} />}
+        {seccion === "guia" && <EditarGuiaGamer avisar={avisar} />}
       </section>
     </div>
   );
@@ -1231,10 +1236,15 @@ function AjusteInventario({
   );
 }
 
-function ClientesAdmin() {
+type RolCuenta = "CLIENTE" | "ADMIN";
+type CuentaParaRol = { id: number; nombre: string; email: string; rol: RolCuenta };
+const nombreRol = { CLIENTE: "Cliente", ADMIN: "Administrador" };
+
+function ClientesAdmin({ actorId, avisar }: { actorId?: number; avisar: (mensaje: string) => void }) {
   const [buscar, setBuscar] = useState("");
   const [desde, setDesde] = useState(0);
   const [clienteId, setClienteId] = useState<number | null>(null);
+  const [cuenta, setCuenta] = useState<CuentaParaRol | null>(null);
   const { data, loading, error, retry } = useQuery<{
     adminClientes: {
       total: number;
@@ -1242,16 +1252,17 @@ function ClientesAdmin() {
         id: number;
         nombre: string;
         email: string;
+        rol: RolCuenta;
         totalPedidos: number;
         gastoConfirmado: number;
         ultimaCompra: string | null;
       }[];
     };
   }>(
-    "query($buscar:String!,$desde:Int!){adminClientes(buscar:$buscar,desde:$desde,limite:20){total items{id nombre email totalPedidos gastoConfirmado ultimaCompra}}}",
+    "query($buscar:String!,$desde:Int!){adminClientes(buscar:$buscar,desde:$desde,limite:20,incluirAdministradores:true){total items{id nombre email rol totalPedidos gastoConfirmado ultimaCompra}}}",
     { buscar, desde },
   );
-  useBackOfficeRefresh(retry, ["PEDIDO", "PAGO"]);
+  useBackOfficeRefresh(retry, ["PEDIDO", "PAGO", "USUARIO"]);
   return (
     <>
       <div className="admin-tools">
@@ -1277,7 +1288,8 @@ function ClientesAdmin() {
             <table>
               <thead>
                 <tr>
-                  <th>Cliente</th>
+                  <th>Cuenta</th>
+                  <th>Rol</th>
                   <th>Pedidos</th>
                   <th>Compras confirmadas</th>
                   <th>Último pedido</th>
@@ -1293,6 +1305,10 @@ function ClientesAdmin() {
                         {c.email} · ID {c.id}
                       </small>
                     </td>
+                    <td>
+                      {nombreRol[c.rol]}
+                      {c.id === actorId && <small>Tu cuenta</small>}
+                    </td>
                     <td>{c.totalPedidos}</td>
                     <td>{dinero(c.gastoConfirmado)}</td>
                     <td>
@@ -1301,19 +1317,29 @@ function ClientesAdmin() {
                         : "—"}
                     </td>
                     <td>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => setClienteId(c.id)}
-                      >
-                        Ver historial
-                      </button>
+                      <div className="admin-acciones-cuenta">
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => setClienteId(c.id)}
+                        >
+                          Ver historial
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          disabled={actorId === undefined || c.id === actorId}
+                          aria-label={`Cambiar rol de ${c.nombre}`}
+                          onClick={() => setCuenta(c)}
+                        >
+                          Cambiar rol
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             {!data?.adminClientes.items.length && (
-              <p className="admin-empty">No hay clientes coincidentes.</p>
+              <p className="admin-empty">No hay cuentas coincidentes.</p>
             )}
           </div>
           <Paginacion
@@ -1326,7 +1352,49 @@ function ClientesAdmin() {
       {clienteId !== null && (
         <DetalleCliente id={clienteId} cerrar={() => setClienteId(null)} />
       )}
+      {cuenta && (
+        <CambiarRol cuenta={cuenta} cerrar={() => setCuenta(null)} guardado={() => {
+          setCuenta(null);
+          retry();
+          avisar("Se actualizó el rol de la cuenta.");
+        }} />
+      )}
     </>
+  );
+}
+
+function CambiarRol({ cuenta, cerrar, guardado }: {
+  cuenta: CuentaParaRol; cerrar: () => void; guardado: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const rol: RolCuenta = cuenta.rol === "ADMIN" ? "CLIENTE" : "ADMIN";
+  async function guardar() {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await graphql(
+        "mutation CambiarRol($id: Int!, $rol: Rol!) { cambiarRolUsuario(id: $id, rol: $rol) { id rol } }",
+        { id: cuenta.id, rol },
+      );
+      guardado();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cambiar el rol.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal titulo="Confirmar cambio de rol" onClose={() => { if (!busy) cerrar(); }}>
+      <p><strong>{cuenta.nombre}</strong> ({cuenta.email}) pasará de <strong>{nombreRol[cuenta.rol]}</strong> a <strong>{nombreRol[rol]}</strong>.</p>
+      <p className="muted">{rol === "ADMIN" ? "Esta cuenta tendrá acceso a las operaciones administrativas." : "Esta cuenta perderá el acceso a las operaciones administrativas."} Deberá volver a iniciar sesión.</p>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="admin-acciones-cuenta">
+        <button className="btn btn-secondary" disabled={busy} onClick={cerrar}>Cancelar</button>
+        <button className="btn" disabled={busy} onClick={() => void guardar()}>{busy ? "Guardando…" : "Confirmar cambio"}</button>
+      </div>
+    </Modal>
   );
 }
 

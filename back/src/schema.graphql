@@ -132,6 +132,7 @@ type ClienteAdmin {
   id: Int!
   nombre: String!
   email: String!
+  rol: Rol!
   totalPedidos: Int!
   gastoConfirmado: Float!
   ultimaCompra: String
@@ -287,7 +288,7 @@ type Query {
   adminPedidos(buscar: String = "", estado: EstadoPedido, metodoPago: String = "", fechaDesde: String, fechaHasta: String, desde: Int = 0, limite: Int = 20): PaginaPedidosAdmin!
   adminPedido(id: Int!): Pedido!
   historialPedido(id: Int!): [EventoEstadoPedido!]!
-  adminClientes(buscar: String = "", desde: Int = 0, limite: Int = 20): PaginaClientesAdmin!
+  adminClientes(buscar: String = "", desde: Int = 0, limite: Int = 20, incluirAdministradores: Boolean = false): PaginaClientesAdmin!
   adminCliente(id: Int!): ClienteAdmin!
   adminPagos(buscar: String = "", estado: EstadoPago, desde: Int = 0, limite: Int = 20): PaginaPagosAdmin!
   adminMovimientos(productoId: Int, desde: Int = 0, limite: Int = 20): PaginaMovimientos!
@@ -403,6 +404,20 @@ enum EntidadBackOffice {
   INVENTARIO
   CATEGORIA
   PAGO
+  USUARIO
+}
+
+type TextoGuiaGamer { clave: String!, texto: String! }
+input TextoGuiaGamerInput { clave: String!, texto: String! }
+type GuiaGamer { revision: Int!, textos: [TextoGuiaGamer!]! }
+
+extend type Query {
+  guiaGamer: GuiaGamer!
+}
+
+extend type Mutation {
+  guardarGuiaGamer(revision: Int!, textos: [TextoGuiaGamerInput!]!): GuiaGamer!
+  cambiarRolUsuario(id: Int!, rol: Rol!): Usuario!
 }
 
 enum AccionBackOffice {

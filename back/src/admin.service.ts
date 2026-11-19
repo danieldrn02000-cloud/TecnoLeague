@@ -1,8 +1,9 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import {
   EstadoPago,
   EstadoPedido,
   Prisma,
+  Rol,
   TipoMovimientoInventario,
 } from "@prisma/client";
 import { GraphQLError } from "graphql";
@@ -45,6 +46,7 @@ function periodo(desde: string, hasta: string) {
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
   constructor(
     private readonly db: PrismaService,
     private readonly eventos: EventosService, //agregamos eventos al constructor
@@ -397,11 +399,11 @@ export class AdminService {
     return actualizado;
   }
 
-  async clientes(buscar = "", desde = 0, limite = 20) {
+  async clientes(buscar = "", desde = 0, limite = 20, incluirAdministradores = false) {
     validarPagina(limite, desde);
     const filtro = buscar.trim();
     const where: Prisma.UsuarioWhereInput = {
-      rol: "CLIENTE",
+      ...(incluirAdministradores ? {} : { rol: "CLIENTE" }),
       ...(filtro
         ? {
             OR: [
@@ -419,6 +421,7 @@ export class AdminService {
           id: true,
           nombre: true,
           email: true,
+          rol: true,
           _count: { select: { pedidos: true } },
           pedidos: {
             orderBy: { fecha: "desc" },
@@ -458,6 +461,7 @@ export class AdminService {
         id: usuario.id,
         nombre: usuario.nombre,
         email: usuario.email,
+        rol: usuario.rol,
         totalPedidos: usuario._count.pedidos,
         gastoConfirmado: gastos.get(usuario.id) ?? 0,
         ultimaCompra: usuario.pedidos[0]?.fecha.toISOString() ?? null,
@@ -466,14 +470,45 @@ export class AdminService {
     };
   }
 
+  async cambiarRolUsuario(id: number, rol: Rol, actorId: number) {
+    if (id === actorId) fallo("Pide a otro administrador que cambie el rol de tu cuenta.", "FORBIDDEN");
+    const { usuario, cambio } = await this.db.$transaction(async (tx) => {
+      // Orden fijo para que dos administradores no puedan degradarse a la vez.
+      const cuentas = await tx.$queryRaw<{ id: number; rol: Rol }[]>`
+        SELECT id, rol::text AS rol FROM usuarios WHERE id IN (${actorId}, ${id}) ORDER BY id FOR UPDATE
+      `;
+      if (cuentas.find((cuenta) => cuenta.id === actorId)?.rol !== "ADMIN")
+        fallo("Ya no tienes permiso para cambiar roles.", "FORBIDDEN");
+      const objetivo = cuentas.find((cuenta) => cuenta.id === id);
+      if (!objetivo) fallo("La cuenta seleccionada no existe.", "NOT_FOUND");
+      const select = { id: true, nombre: true, email: true, rol: true } as const;
+      if (objetivo.rol === rol) {
+        const usuario = await tx.usuario.findUniqueOrThrow({ where: { id }, select });
+        return { usuario, cambio: false };
+      }
+      const usuario = await tx.usuario.update({
+        where: { id },
+        data: { rol, versionSesion: { increment: 1 } },
+        select,
+      });
+      return { usuario, cambio: true };
+    });
+    if (cambio) {
+      this.logger.log({ accion: "CAMBIO_ROL", actorId, usuarioId: id, rol });
+      await this.eventos.publicarBackOffice({ entidad: "USUARIO", entidadId: id, accion: "ACTUALIZADO" });
+    }
+    return usuario;
+  }
+
   async cliente(id: number) {
     if (!Number.isInteger(id) || id < 1) fallo("Cliente inválido.");
     const usuario = await this.db.usuario.findFirst({
-      where: { id, rol: "CLIENTE" },
+      where: { id },
       select: {
         id: true,
         nombre: true,
         email: true,
+        rol: true,
         pedidos: {
           where: {
             status: { not: "CANCELADO" },

@@ -52,6 +52,14 @@ model Categoria {
   @@map("categorias")
 }
 
+model GuiaGamer {
+  id       Int  @id
+  revision Int  @default(0)
+  textos   Json @default("[]")
+
+  @@map("guia_gamer")
+}
+
 model Producto {
   id               Int                    @id @default(autoincrement())
   nombre           String

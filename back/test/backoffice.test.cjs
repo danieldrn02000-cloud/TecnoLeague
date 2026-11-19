@@ -16,6 +16,7 @@ require("dotenv").config({
 });
 
 const { NestFactory } = require("@nestjs/core");
+const { JwtService } = require("@nestjs/jwt");
 const { createClient } = require("graphql-ws");
 const WebSocket = require("ws");
 const { AppModule } = require("../dist/app.module");
@@ -82,6 +83,64 @@ test(
       } finally {
         clearInterval(interval);
       }
+
+      const jwt = app.get(JwtService);
+      const tokenPara = (usuario) => jwt.sign(
+        { sub: usuario.id, sv: usuario.versionSesion },
+        { expiresIn: "5m" },
+      );
+      const tokenAdmin = tokenPara(admin);
+      const graphql = async (query, variables, token) => {
+        const response = await fetch(`http://127.0.0.1:${port}/graphql`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ query, variables }),
+        });
+        return response.json();
+      };
+
+      await t.test("guía pública, edición protegida y control de revisiones", async (st) => {
+        const anterior = await db.guiaGamer.findUniqueOrThrow({ where: { id: 1 } });
+        st.after(() => db.guiaGamer.update({
+          where: { id: 1 },
+          data: { textos: anterior.textos, revision: anterior.revision },
+        }));
+        const guardar = `mutation($revision:Int!, $textos:[TextoGuiaGamerInput!]!) {
+          guardarGuiaGamer(revision:$revision, textos:$textos) { revision }
+        }`;
+        const variables = { revision: anterior.revision, textos: [{ clave: "introduccion.texto2", texto: "Título actualizado" }] };
+        assert.equal((await graphql(guardar, variables)).errors[0].extensions.code, "UNAUTHENTICATED");
+        const guardada = await graphql(guardar, variables, tokenAdmin);
+        assert.equal(guardada.errors, undefined, JSON.stringify(guardada.errors));
+        assert.equal(guardada.data.guardarGuiaGamer.revision, anterior.revision + 1);
+        const consulta = await graphql("{ guiaGamer { revision textos { clave texto } } }");
+        assert.deepEqual(consulta.data.guiaGamer.textos, variables.textos);
+        assert.equal((await graphql(guardar, variables, tokenAdmin)).errors[0].extensions.code, "CONFLICT");
+      });
+
+      await t.test("solo admins cambian roles ajenos y se invalidan las sesiones anteriores", async (st) => {
+        const cuenta = await db.usuario.create({
+          data: { nombre: "Cuenta de prueba", email: `rol-${randomUUID()}@example.test` },
+        });
+        st.after(() => db.usuario.delete({ where: { id: cuenta.id } }));
+        const cambiar = `mutation($id:Int!, $rol:Rol!) { cambiarRolUsuario(id:$id, rol:$rol) { rol } }`;
+        const promover = { id: cuenta.id, rol: "ADMIN" };
+        const cliente = tokenPara(cuenta);
+        assert.equal((await graphql(cambiar, promover, cliente)).errors[0].extensions.code, "FORBIDDEN");
+        assert.equal((await graphql(cambiar, { id: admin.id, rol: "CLIENTE" }, tokenAdmin)).errors[0].extensions.code, "FORBIDDEN");
+        assert.equal((await graphql(cambiar, promover, tokenAdmin)).data.cambiarRolUsuario.rol, "ADMIN");
+        assert.equal((await graphql("{ verificarAdmin }", {}, cliente)).errors[0].extensions.code, "UNAUTHENTICATED");
+        const conRolNuevo = await db.usuario.findUniqueOrThrow({ where: { id: cuenta.id } });
+        const nuevoToken = tokenPara(conRolNuevo);
+        assert.equal((await graphql("{ verificarAdmin }", {}, nuevoToken)).data.verificarAdmin, true);
+        const listado = await graphql("{ adminClientes(incluirAdministradores:true) { items { id rol } } }", {}, tokenAdmin);
+        assert.ok(listado.data.adminClientes.items.some(item => item.id === cuenta.id && item.rol === "ADMIN"));
+        assert.equal((await graphql(cambiar, { id: cuenta.id, rol: "CLIENTE" }, tokenAdmin)).data.cambiarRolUsuario.rol, "CLIENTE");
+        assert.equal((await graphql("{ verificarAdmin }", {}, nuevoToken)).errors[0].extensions.code, "UNAUTHENTICATED");
+      });
 
       await t.test("rechaza sin sesión y con rol CLIENTE", async () => {
         const comprador = await db.usuario.create({

@@ -10,7 +10,8 @@ export type EntidadBackOffice =
   | "PRODUCTO"
   | "INVENTARIO"
   | "CATEGORIA"
-  | "PAGO";
+  | "PAGO"
+  | "USUARIO";
 
 export type AccionBackOffice =
   | "CREADO"

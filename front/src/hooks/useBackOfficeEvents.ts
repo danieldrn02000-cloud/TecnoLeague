@@ -16,7 +16,7 @@ import {
 //Reconexion con espera progresiva
 //Agrupacion de eventos durante 200ms
 export type EntidadBackOffice =
-  "PEDIDO" | "PRODUCTO" | "INVENTARIO" | "CATEGORIA" | "PAGO";
+  "PEDIDO" | "PRODUCTO" | "INVENTARIO" | "CATEGORIA" | "PAGO" | "USUARIO";
 
 type EventoBackOffice = {
   eventoId: string;

@@ -2854,3 +2854,20 @@ tr:last-child td {
   .guide-index { grid-template-columns: 1fr; }
   .guide-card, .guide-finish { padding: 20px; }
 }
+
+.guia-editor,
+.guia-editor-campos {
+  display: grid;
+  gap: 16px;
+}
+.guia-editor textarea {
+  white-space: pre-wrap;
+}
+.guia-editor > button {
+  justify-self: start;
+}
+.admin-acciones-cuenta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
