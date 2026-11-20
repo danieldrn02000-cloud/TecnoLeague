@@ -224,7 +224,7 @@ ejecutarlo. El seed no convierte una cuenta cliente existente en administradora.
 | Confirmación de pedidos | Las mismas credenciales de Resend; `ORDER_EMAIL_FROM` permite elegir otro remitente verificado. |
 | Enlace de la tienda en correos | `PUBLIC_SITE_URL` con el origen HTTPS del frontend. |
 | Rastreo | `TRACK17_API_KEY` en el backend. |
-| Imágenes subidas | `IMAGE_UPLOAD_DIR` si se necesita un directorio distinto de `back/uploads`. |
+| Imágenes subidas | `CLOUDINARY_URL` en el backend para subir a Cloudinary. `IMAGE_UPLOAD_DIR` para los archivos locales. |
 
 Los valores del backend y los secretos del servidor Astro se configuran en sus
 respectivos entornos. Las variables `PUBLIC_*` del frontend quedan disponibles
@@ -267,8 +267,10 @@ megapíxeles, y reduce sus dimensiones cuando corresponde.
 
 JPG y PNG se vuelven a codificar en sus formatos de salida. AVIF, WebP, GIF y TIFF
 se normalizan a WebP. En archivos animados o con varias páginas se usa la primera
-imagen. El archivo se guarda en el backend y su ruta queda en `productos.imagen`.
-Astro sirve esas imágenes a los visitantes sin exigir sesión.
+imagen. En producción, al elegir un archivo con **Añadir imagen**, el backend lo
+sube a Cloudinary y rellena el campo **Imagen** con su URL pública HTTPS. Al guardar
+el producto, esa referencia queda en `productos.imagen`. En desarrollo, si no se
+configura Cloudinary, las subidas se guardan en `back/uploads` o `IMAGE_UPLOAD_DIR`.
 
 El inventario registra entradas, salidas, ajustes, reservas y liberaciones. El
 mínimo de existencias ya fue retirado de la tabla de productos y de la interfaz;
@@ -299,12 +301,18 @@ npm run db:migrate && npm run start -w back
 ```
 
 Las variables del backend se configuran en Render. PostgreSQL puede alojarse en
-Neon u otro servicio compatible. Las imágenes necesitan un disco persistente;
-por ejemplo, montar `/var/data` y configurar
-`IMAGE_UPLOAD_DIR=/var/data/tecnoleague/imagenes`.
+Neon u otro servicio compatible.
 
-Definir una ruta no crea un disco persistente. Los archivos existentes deben
-conservarse y respaldarse junto con las referencias de la base de datos.
+Para habilitar las subidas, abre **Cloudinary → Settings → API Keys** y copia
+el **API Environment Variable** del entorno de producto. En **Render → servicio
+del backend → Environment**, crea `CLOUDINARY_URL` con el valor
+`cloudinary://API_KEY:API_SECRET@CLOUD_NAME`. Usa solo el valor de la variable y
+guarda los cambios con un despliegue. La autenticación de la subida se realiza en
+NestJS con las claves de Cloudinary. Mantén esa variable únicamente en el backend.
+
+Las referencias existentes conservan su URL. Las imágenes antiguas que apuntan
+a `/images/uploads/` dependen de los archivos en `IMAGE_UPLOAD_DIR` o `back/uploads`.
+Para alojarlas en Cloudinary, vuelve a subirlas y guarda el producto.
 
 ### Frontend en Netlify
 

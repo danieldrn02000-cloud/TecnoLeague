@@ -4,11 +4,13 @@ import {
   ForbiddenException,
   Get,
   HttpException,
+  Logger,
   NotFoundException,
   Param,
   PayloadTooLargeException,
   Post,
   Req,
+  ServiceUnavailableException,
   StreamableFile,
   UnauthorizedException,
   UnsupportedMediaTypeException,
@@ -33,12 +35,67 @@ const MENSAJE_FORMATO = "Selecciona una imagen JPG, JPEG, PNG, AVIF, WebP, GIF o
 
 @Controller("imagenes")
 export class ImagenesController {
+  private readonly logger = new Logger(ImagenesController.name);
+
   constructor(private readonly auth: AuthService) {}
 
   private directorio() {
     return resolve(
       process.env.IMAGE_UPLOAD_DIR || resolve(__dirname, "../uploads"),
     );
+  }
+
+  private async subirCloudinary(urlConfiguracion: string, contenido: Buffer) {
+    let configuracion: URL;
+    let apiKey: string;
+    let apiSecret: string;
+    try {
+      configuracion = new URL(urlConfiguracion);
+      apiKey = decodeURIComponent(configuracion.username);
+      apiSecret = decodeURIComponent(configuracion.password);
+      if (
+        configuracion.protocol !== "cloudinary:" ||
+        !/^[a-z0-9_-]+$/i.test(configuracion.hostname) ||
+        !/^\d+$/.test(apiKey) || !apiSecret
+      ) {
+        throw new Error("Se requieren el nombre del entorno, la clave y el secreto.");
+      }
+    } catch {
+      this.logger.error("La variable CLOUDINARY_URL es inválida.");
+      throw new ServiceUnavailableException("La subida de imágenes necesita configuración.");
+    }
+
+    try {
+      const { v2: cloudinary } = await import("cloudinary");
+      return await new Promise<string>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream({
+          cloud_name: configuracion.hostname,
+          api_key: apiKey,
+          api_secret: apiSecret,
+          resource_type: "image",
+          type: "upload",
+          folder: "tecnoleague/productos",
+          public_id: randomUUID(),
+          overwrite: false,
+          timeout: 15000,
+          disable_promises: true,
+        }, (error, resultado) => {
+          const url = resultado?.secure_url;
+          if (error || typeof url !== "string" || !url.startsWith("https://") || url.length > 1000) {
+            reject(error ?? new Error("Cloudinary no devolvió una URL pública válida."));
+            return;
+          }
+          resolve(url);
+        });
+        stream.once("error", reject).end(contenido);
+      });
+    } catch (error) {
+      const codigo = (error as { http_code?: unknown } | undefined)?.http_code;
+      this.logger.error(typeof codigo === "number"
+        ? `Falló la subida a Cloudinary (HTTP ${codigo}).`
+        : "Falló la subida a Cloudinary.");
+      throw new ServiceUnavailableException("No se pudo subir la imagen. Inténtalo de nuevo.");
+    }
   }
 
   @Post()
@@ -114,6 +171,14 @@ export class ImagenesController {
       throw new PayloadTooLargeException(
         "La imagen procesada supera los 5 MB. Reduce sus dimensiones.",
       );
+
+    const cloudinaryUrl = process.env.CLOUDINARY_URL?.trim();
+    if (cloudinaryUrl) return { imagen: await this.subirCloudinary(cloudinaryUrl, contenido) };
+    if (process.env.NODE_ENV === "production" || process.env.RENDER === "true") {
+      this.logger.error("Falta CLOUDINARY_URL para habilitar la subida de imágenes.");
+      throw new ServiceUnavailableException("La subida de imágenes necesita configuración.");
+    }
+
     const archivo = `${randomUUID()}.${tipo === "image/png" ? "png" : tipo === "image/jpeg" ? "jpg" : "webp"}`;
     try {
       await mkdir(this.directorio(), { recursive: true });

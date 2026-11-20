@@ -1,9 +1,11 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { mkdtemp, rm, readFile } = require("node:fs/promises");
+const { mkdtemp, rm, readFile, readdir } = require("node:fs/promises");
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
 const { randomBytes } = require("node:crypto");
+const https = require("node:https");
+const { Readable, Writable } = require("node:stream");
 require("reflect-metadata");
 const { Module } = require("@nestjs/common");
 const { NestFactory } = require("@nestjs/core");
@@ -18,6 +20,12 @@ const { errorCatalogo } = require("../dist/catalogo-error");
 test("imágenes: permisos, validación del contenido, almacenamiento y lectura HTTP", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tecnoleague-images-"));
   const previous = process.env.IMAGE_UPLOAD_DIR;
+  const cloudinaryAnterior = process.env.CLOUDINARY_URL;
+  const renderAnterior = process.env.RENDER;
+  const entornoAnterior = process.env.NODE_ENV;
+  delete process.env.CLOUDINARY_URL;
+  delete process.env.RENDER;
+  process.env.NODE_ENV = "test";
   process.env.IMAGE_UPLOAD_DIR = directory;
   const jwt = new JwtService({
     secret: randomBytes(32).toString("hex"),
@@ -161,10 +169,74 @@ test("imágenes: permisos, validación del contenido, almacenamiento y lectura H
         );
       },
     );
+    await t.test("sube la imagen validada a Cloudinary y devuelve su URL pública", async (t) => {
+      const imagen = "https://res.cloudinary.com/tl-test/image/upload/v1/tecnoleague/productos/prueba.webp";
+      const discoAnterior = await readdir(directory);
+      let estado = 200;
+      let respuesta = { secure_url: imagen };
+      const solicitudes = [];
+      t.mock.method(https, "request", (opciones, callback) => {
+        const partes = [];
+        const request = new Writable({
+          write(parte, encoding, done) {
+            partes.push(parte);
+            done();
+          },
+          final(done) {
+            solicitudes.push({ opciones, contenido: Buffer.concat(partes) });
+            const response = Readable.from([JSON.stringify(respuesta)]);
+            response.statusCode = estado;
+            callback(response);
+            done();
+          },
+        });
+        request.setTimeout = () => request;
+        return request;
+      });
+      process.env.RENDER = "true";
+      assert.equal((await upload(png)).status, 503);
+      process.env.CLOUDINARY_URL = "configuracion-invalida";
+      assert.equal((await upload(png)).status, 503);
+      assert.equal(solicitudes.length, 0);
+
+      process.env.CLOUDINARY_URL = "cloudinary://1234:secreto-ficticio@tl-test";
+      assert.equal((await upload(png, "image/jpeg")).status, 400);
+      assert.equal((await upload(png, "image/png", jwt.sign({ sub: 2 }))).status, 403);
+      assert.equal(solicitudes.length, 0);
+
+      const response = await upload(await sharp(png).avif().toBuffer(), "image/avif");
+      assert.equal(response.status, 201);
+      assert.deepEqual(await response.json(), { imagen });
+      assert.equal(solicitudes.length, 1);
+      const { opciones, contenido } = solicitudes[0];
+      assert.equal(opciones.hostname, "api.cloudinary.com");
+      assert.equal(opciones.path, "/v1_1/tl-test/image/upload");
+      const multipart = await new Response(contenido, { headers: opciones.headers }).formData();
+      assert.equal(multipart.get("api_key"), "1234");
+      assert.equal(multipart.get("folder"), "tecnoleague/productos");
+      assert.match(multipart.get("signature"), /^[a-f0-9]{40,64}$/);
+      assert.ok(!contenido.includes("secreto-ficticio"));
+      const archivo = await multipart.get("file").arrayBuffer();
+      assert.equal((await sharp(Buffer.from(archivo)).metadata()).format, "webp");
+
+      estado = 401;
+      respuesta = { error: { message: "Detalle privado" } };
+      const fallo = await upload(png);
+      assert.equal(fallo.status, 503);
+      assert.equal((await fallo.json()).message, "No se pudo subir la imagen. Inténtalo de nuevo.");
+      assert.deepEqual(await readdir(directory), discoAnterior);
+    });
   } finally {
     await app.close();
-    if (previous === undefined) delete process.env.IMAGE_UPLOAD_DIR;
-    else process.env.IMAGE_UPLOAD_DIR = previous;
+    for (const [nombre, valor] of Object.entries({
+      IMAGE_UPLOAD_DIR: previous,
+      CLOUDINARY_URL: cloudinaryAnterior,
+      RENDER: renderAnterior,
+      NODE_ENV: entornoAnterior,
+    })) {
+      if (valor === undefined) delete process.env[nombre];
+      else process.env[nombre] = valor;
+    }
     await rm(directory, { recursive: true, force: true });
   }
 });

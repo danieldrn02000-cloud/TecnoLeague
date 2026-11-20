@@ -22,6 +22,7 @@
     "@nestjs/jwt": "12.0.1",
     "@nestjs/platform-express": "12.0.3",
     "@prisma/client": "6.19.3",
+    "cloudinary": "2.11.0",
     "dotenv": "17.2.3",
     "google-auth-library": "^11.3.4",
     "graphql": "16.11.0",

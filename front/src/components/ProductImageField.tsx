@@ -107,7 +107,7 @@ export function ProductImageField({
           {error}
         </p>
       )}
-      {imagen.startsWith("/images/uploads/") && (
+      {(imagen.startsWith("/images/uploads/") || imagen.startsWith("https://")) && (
         <img
           src={imagen}
           alt="Vista previa del producto"
